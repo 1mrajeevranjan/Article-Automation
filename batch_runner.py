@@ -22,7 +22,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ai_client import AIClient, AIClientError, ping_models
+from ai_client import AIClient, AIClientError, probe_models
 from excel_io import ExcelBatch
 from orchestrator import run_article
 
@@ -188,23 +188,34 @@ class JobRunner(threading.Thread):
         chain = [self.job.model] + [m for m in (self.config.get("free_models") or [])
                                     if m != self.job.model]
         try:
-            alive = ping_models(chain, self.config)
+            # deep=True: a 1-token ping cannot tell a writer from a classifier, and a
+            # classifier in the pool produces 3-word "sections" that pass every HTTP
+            # check and ruin the article.
+            results = probe_models(chain, self.config, deep=True)
         except Exception:  # noqa: BLE001 - a failed probe must not stop the run
             return
 
+        alive = [m for m in chain if results.get(m, (True, ""))[0]]
         if not alive:
             self._log("no configured model answered the health check — trying anyway")
             return
 
+        # Keep only what can actually serve this batch, so a failure inside an article
+        # falls through to a working model instead of walking 19 dead ones.
+        self.config["free_models"] = alive
+
         if self.job.model not in alive:
             replacement = alive[0]
-            self._log(f"{self.job.model.split('/')[-1]} is not responding — "
+            reason = results.get(self.job.model, (False, "not responding"))[1]
+            self._log(f"{self.job.model.split('/')[-1]}: {reason} — "
                       f"switching this batch to {replacement.split('/')[-1]}")
             self.job.model = replacement
             provider["model"] = replacement
 
-        # Keep only live models in the fallback chain, preferred order preserved.
-        self.config["free_models"] = [m for m in chain if m in alive]
+        rejected = [(m, results[m][1]) for m in chain if not results.get(m, (True, ""))[0]]
+        if rejected:
+            self._log(f"{len(alive)} model(s) ready, {len(rejected)} unavailable "
+                      f"(see Models… for why)")
 
     def run(self):
         job = self.job

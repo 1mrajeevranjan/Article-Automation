@@ -10,6 +10,7 @@ import types
 os.environ.setdefault("AI_API_KEY", "test-key")
 
 import ai_client
+import model_health
 from ai_client import AIClient, AIClientError, CancelledError
 
 
@@ -40,6 +41,7 @@ class FakeResponse:
 
 def make_client(handler, cancel_event=None):
     """Builds an AIClient whose underlying SDK call is replaced by `handler(model)`."""
+    model_health.REGISTRY.reset()
     client = AIClient(BASE_CONFIG, cancel_event=cancel_event)
     calls = []
 

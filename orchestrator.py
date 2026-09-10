@@ -12,6 +12,10 @@ from agents import outline_agent, writer_agent, intro_conclusion_agent, editor_v
 
 logger = logging.getLogger("orchestrator")
 
+# Left at the end of the budget for rendering and bookkeeping, which make no
+# API calls but must still happen inside the outer timeout.
+DEADLINE_RESERVE_SECONDS = 20
+
 
 def _prompt_int(prompt: str, minimum: int, min_message: str) -> int:
     while True:
@@ -106,6 +110,14 @@ def run_article(
     timeout = article_timeout_for(sections, config)
     result: dict = {}
 
+    # The client must know the article's budget, not just its own per-request one.
+    # Reserve a slice for the stages after the last API call (pdf render, status write)
+    # so the article reports its own failure instead of being killed by the outer join.
+    # getattr because run_article accepts any client-shaped object, test doubles included.
+    set_deadline = getattr(client, "set_deadline", None)
+    if set_deadline:
+        set_deadline(time.time() + timeout - DEADLINE_RESERVE_SECONDS)
+
     def _worker():
         result["state"] = _run_article_inner(
             row_number, title, scope, author, word_count, sections, config, client,
@@ -125,8 +137,12 @@ def run_article(
         state.status = "Failed"
         state.notes = (f"Exceeded overall article timeout ({timeout}s) — the provider "
                        f"stalled, or too many batches were sharing the request budget")
+        if set_deadline:
+            set_deadline(None)
         return state
 
+    if set_deadline:
+        set_deadline(None)
     return result["state"]
 
 

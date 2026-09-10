@@ -21,7 +21,8 @@ class SlowClient:
         self.cancel_event = cancel_event
         self.calls = 0
 
-    def chat_completion(self, system_prompt, user_prompt, model=None, temperature=None):
+    def chat_completion(self, system_prompt, user_prompt, model=None, temperature=None,
+                        min_words=None):
         from ai_client import CancelledError
         if self.cancel_event.is_set():
             raise CancelledError("Stopped by user")

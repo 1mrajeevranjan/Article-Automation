@@ -364,16 +364,19 @@ def test_dead_pinned_model_is_swapped(monkey_alive=("model-b:free",)):
     runner = JobRunner(job, CONFIG, manager.registry, lambda e: logs.append(e),
                        manager.request_semaphore)
 
-    original_ping = ai_client.ping_models
-    batch_runner.ping_models = lambda models, config, timeout=20: list(monkey_alive)
+    original_probe = batch_runner.probe_models
+    batch_runner.probe_models = lambda models, config, timeout=20, deep=False: {
+        m: ((m in monkey_alive), "" if m in monkey_alive else "provider down")
+        for m in models
+    }
     try:
         runner._verify_model()
     finally:
-        batch_runner.ping_models = original_ping
+        batch_runner.probe_models = original_probe
 
     assert job.model == "model-b:free", f"dead model should be swapped, got {job.model}"
     assert runner.config["free_models"] == ["model-b:free"], runner.config["free_models"]
-    assert any("not responding" in e[2] for e in logs if e[0] == "log"), logs
+    assert any("provider down" in e[2] for e in logs if e[0] == "log"), logs
     print(f"pinned dead model swapped to {job.model} before any row ran: OK")
 
 
@@ -387,12 +390,14 @@ def test_live_pinned_model_is_kept():
     job = manager.add_job(sheet, TMP, "model-a:free", [1], 10, 500, 5)
     runner = JobRunner(job, CONFIG, manager.registry, lambda e: None, manager.request_semaphore)
 
-    original = batch_runner.ping_models
-    batch_runner.ping_models = lambda models, config, timeout=20: ["model-a:free", "model-b:free"]
+    original = batch_runner.probe_models
+    batch_runner.probe_models = lambda models, config, timeout=20, deep=False: {
+        m: (m in ("model-a:free", "model-b:free"), "") for m in models
+    }
     try:
         runner._verify_model()
     finally:
-        batch_runner.ping_models = original
+        batch_runner.probe_models = original
 
     assert job.model == "model-a:free", f"a live pinned model must not be changed: {job.model}"
     print("a responding pinned model is left untouched: OK")

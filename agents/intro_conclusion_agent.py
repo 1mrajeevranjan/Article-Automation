@@ -20,7 +20,9 @@ def run(state: ArticleState, config: dict, client: AIClient, intro_words: int, c
         **year_fields(state),
     )
     model, temperature = agent_model_temperature(config, "intro_conclusion_agent")
-    raw = client.chat_completion(SYSTEM_PROMPT, user_prompt, model=model, temperature=temperature)
+    raw = client.chat_completion(SYSTEM_PROMPT, user_prompt, model=model,
+                                 temperature=temperature,
+                                 min_words=intro_words + conclusion_words)
 
     intro, conclusion = "", ""
     if "###CONCLUSION###" in raw:

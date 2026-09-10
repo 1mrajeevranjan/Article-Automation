@@ -13,7 +13,8 @@ from pdf_renderer import render_pdf
 
 
 class FakeClient:
-    def chat_completion(self, system_prompt, user_prompt, model=None, temperature=None):
+    def chat_completion(self, system_prompt, user_prompt, model=None, temperature=None,
+                        min_words=None):
         if "Outline Agent" in system_prompt or "outline" in user_prompt.lower():
             pass
         if "outline" in user_prompt.lower() and "headings" in user_prompt.lower():

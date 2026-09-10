@@ -8,6 +8,7 @@ ai_provider:
   global_max_concurrent_requests: 6
   request_timeout_seconds: 120
   seconds_per_call: 75
+  max_models_per_call: 4
   provider_routing:
     ignore:
     - nvidia
@@ -53,4 +54,4 @@ free_models:
 - poolside/laguna-xs-2.1:free
 - thinkingmachines/inkling-small:free
 - thinkingmachines/inkling:free
-window_geometry: 1120x800+34+67
+window_geometry: 980x828+0+33

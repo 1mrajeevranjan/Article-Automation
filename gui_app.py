@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 
 import config_manager
 from ai_client import AIClient, AIClientError, probe_models
+import model_health as health
+from model_panel import ModelPanel
 from batch_runner import JobManager, MAX_PARALLEL_JOBS, partition_batches
 from excel_io import ExcelBatch, MissingColumnsError
 from orchestrator import run_article
@@ -147,9 +149,15 @@ class SettingsTab(ttk.Frame):
         self.model_combo.grid(row=r, column=1, sticky="w", pady=3, padx=(8, 0))
         self.vars["model"] = model_var
         r += 1
-        ttk.Button(left, text="Fetch free models", command=self._fetch_models).grid(
-            row=r, column=1, sticky="w", padx=(8, 0), pady=(0, 2)
-        )
+        model_buttons = ttk.Frame(left)
+        model_buttons.grid(row=r, column=1, sticky="w", padx=(8, 0), pady=(0, 2))
+        ttk.Button(model_buttons, text="Fetch free models",
+                   command=self._fetch_models).pack(side="left")
+        # A list of 19 names says nothing about which will work. This does.
+        ttk.Button(model_buttons, text="Models…", width=9,
+                   command=lambda: ModelPanel.show(self.winfo_toplevel(),
+                                                   on_pick=self.vars["model"].set)
+                   ).pack(side="left", padx=(8, 0))
         r += 1
         self.model_status = ttk.Label(left, text="", foreground="gray", wraplength=240)
         self.model_status.grid(row=r, column=1, sticky="w", padx=(8, 0))
@@ -372,8 +380,16 @@ class BatchTab(ttk.Frame):
         model_row = ttk.Frame(form)
         model_row.pack(fill="x", pady=(6, 0))
         field_label(model_row, "Model")
-        self.parallel_model_combo = ttk.Combobox(model_row, textvariable=self.parallel_model_var, width=36)
+        self.parallel_model_combo = ttk.Combobox(model_row, textvariable=self.parallel_model_var, width=32)
         self.parallel_model_combo.pack(side="left")
+        # The dot answers "will this actually work?" without opening anything.
+        self.model_dot = tk.Canvas(model_row, width=11, height=11, highlightthickness=0,
+                                   bg=self.winfo_toplevel().cget("bg"))
+        self.model_dot.pack(side="left", padx=(8, 0))
+        ttk.Button(model_row, text="Models…", width=9,
+                   command=self._open_model_panel).pack(side="left", padx=(8, 0))
+        self.parallel_model_combo.bind("<<ComboboxSelected>>",
+                                       lambda _e: self._refresh_model_dot())
 
         run_row = ttk.Frame(form)
         run_row.pack(fill="x", pady=(6, 0))
@@ -465,11 +481,39 @@ class BatchTab(ttk.Frame):
     def _refresh_parallel_models(self):
         cfg = config_manager.load_config()
         models = cfg.get("free_models") or [cfg["ai_provider"]["model"]]
-        self.parallel_model_combo.config(values=[AUTO_MODEL] + list(models))
+        # Ready models first, so the top of the list is the part that works.
+        ordered = health.REGISTRY.usable(models) or list(models)
+        ordered += [m for m in models if m not in ordered]
+        self.parallel_model_combo.config(values=[AUTO_MODEL] + ordered)
         if not self.parallel_model_var.get():
             # Default to spreading load: parallel batches on one model all die together
             # the moment that model's quota or concurrency cap is reached.
             self.parallel_model_var.set(AUTO_MODEL)
+        self._refresh_model_dot()
+
+    def _refresh_model_dot(self):
+        """Colour the dot beside the Model box for whatever is currently selected."""
+        if not hasattr(self, "model_dot") or not self.model_dot.winfo_exists():
+            return
+        chosen = self.parallel_model_var.get().strip()
+        if chosen == AUTO_MODEL or not chosen:
+            models = config_manager.load_config().get("free_models") or []
+            ready = [m for m in models if health.REGISTRY.state(m) == health.READY]
+            limited = [m for m in models if health.REGISTRY.state(m) == health.LIMITED]
+            state = health.READY if ready else (health.LIMITED if limited else health.UNKNOWN)
+        else:
+            state = health.REGISTRY.state(chosen)
+        self.model_dot.delete("all")
+        self.model_dot.create_oval(1, 1, 10, 10,
+                                   fill=health.STATE_COLOUR[state], outline="")
+
+    def _open_model_panel(self):
+        ModelPanel.show(self.winfo_toplevel(), on_pick=self._use_model)
+
+    def _use_model(self, model: str):
+        self.parallel_model_var.set(model)
+        self._refresh_model_dot()
+        self._log(f"Model set to {model.split('/')[-1]}")
 
     def _models_for(self, batch_numbers: list[int], pool: list | None = None) -> dict:
         """Assigns a model to each batch, round-robin when set to Auto."""
@@ -487,8 +531,11 @@ class BatchTab(ttk.Frame):
         candidates = list(cfg.get("free_models") or [cfg["ai_provider"]["model"]])
         self.parallel_status.config(text="checking models…", foreground="gray")
         self.update_idletasks()
-        results = probe_models(candidates, cfg)
+        # deep=True: the ping-only check passed a content-safety classifier that then
+        # answered 1,000-word section requests with three words.
+        results = probe_models(candidates, cfg, deep=True)
         alive = [m for m in candidates if results.get(m, (True, ""))[0]]
+        self._refresh_model_dot()
 
         # "Skipping unavailable models" told the user nothing they could act on. Grouping
         # by cause does: a daily quota needs credits or a wait, a down provider needs
@@ -503,6 +550,8 @@ class BatchTab(ttk.Frame):
         if "daily free quota used up" in by_reason:
             self._log("Daily free quota is an account limit, not a setting — it resets "
                       "at 00:00 UTC, or add credits at openrouter.ai to lift it.")
+        if by_reason:
+            self._log("Open Models… for the full traffic-light list.")
         if not alive:
             self._log("No configured model answered — using the Settings model anyway.")
             return [cfg["ai_provider"]["model"]]
@@ -1299,8 +1348,8 @@ class App(tk.Tk):
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="Testing & Troubleshooting Guide",
                               command=self._menu_open_testing_guide)
-        help_menu.add_command(label="Probe Models (which ones work now)",
-                              command=self._menu_probe_hint)
+        help_menu.add_command(label="Model Availability…", accelerator="Cmd+Shift+M",
+                              command=self._menu_show_models)
         menubar.add_cascade(label="Help", menu=help_menu)
 
         self.config(menu=menubar)
@@ -1325,6 +1374,7 @@ class App(tk.Tk):
             ("<Command-period>", lambda: self._on_tab(lambda t: t._stop_parallel())),
             ("<Command-b>", lambda: self._on_tab(lambda t: t._rebuild_batches())),
             ("<Command-G>", lambda: self._on_tab(lambda t: t._regenerate_selected())),
+            ("<Command-M>", self._menu_show_models),
             ("<Command-Key-1>", lambda: self.notebook.select(0)),
             ("<Command-braceright>", lambda: self._cycle_tab(1)),
             ("<Command-braceleft>", lambda: self._cycle_tab(-1)),
@@ -1403,14 +1453,11 @@ class App(tk.Tk):
         if guide.exists():
             subprocess.run(["open", str(guide)], check=False)
 
-    def _menu_probe_hint(self):
-        messagebox.showinfo(
-            "Check which models work",
-            "In Terminal, from the project folder:\n\n"
-            "    .venv/bin/python tests_probe_models.py\n\n"
-            "It lists every free model that works right now, with speed, and prints a "
-            "recommendation. Put that model in Settings → Model.",
-        )
+    def _menu_show_models(self):
+        """Every model, colour-coded, with the reason any of them is out."""
+        tab = self._current_tab()
+        on_pick = tab._use_model if isinstance(tab, BatchTab) else None
+        ModelPanel.show(self, on_pick=on_pick)
 
     def _cycle_tab(self, step: int):
         tabs = self.notebook.tabs()

@@ -31,6 +31,9 @@ def run(
         **year_fields(state),
     )
     model, temperature = agent_model_temperature(config, "writer_agent")
-    text = client.chat_completion(SYSTEM_PROMPT, user_prompt, model=model, temperature=temperature)
+    # min_words lets the client reject a model that answers a 1,000-word request with
+    # three words (a classifier, not a writer) and fall through to one that can.
+    text = client.chat_completion(SYSTEM_PROMPT, user_prompt, model=model,
+                                  temperature=temperature, min_words=target_words)
     state.section_drafts[section_heading] = text.strip()
     return state

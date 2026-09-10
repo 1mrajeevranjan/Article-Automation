@@ -12,7 +12,7 @@ Excel file row by row so any run can be stopped and resumed exactly where it lef
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
-![Tests](https://img.shields.io/badge/tests-13%20suites-brightgreen)
+![Tests](https://img.shields.io/badge/tests-14%20suites-brightgreen)
 
 ## Features
 
@@ -25,9 +25,10 @@ Excel file row by row so any run can be stopped and resumed exactly where it lef
   folder. A shared request budget keeps concurrent batches from starving each other.
 - **Resumable by design** — status is written back into the Excel file after every row.
   Stop mid-batch, close the app, reopen days later — finished rows are never redone.
-- **Model fallback and live health checks** — a configurable chain of free/paid models
-  with automatic failover, and an "Auto" mode that pings every candidate before a run and
-  routes work only to the ones actually responding right now.
+- **Model health, with a traffic light** — every model is shown green (answering),
+  yellow (daily quota used up or a passing outage — it comes back) or red (restricted,
+  not offered, or not a writer at all), in the macOS traffic-light shades. Press
+  **Models…** or Cmd+Shift+M. See [Model reliability](#model-reliability).
 - **Two writing styles, grounded in real style guides** — IEEE Research Paper (IEEE
   Editorial Style Manual: formal, third-person, numbered references) or Blog Post
   (HubSpot voice/tone: educational, conversational, second-person).
@@ -148,12 +149,46 @@ source of truth either way.
 
 **Settings → Fetch free models** pulls the provider's live `:free` catalogue, writes it
 to `free_models`, and pushes it into every open sheet tab, so the same complete list is
-selectable everywhere. Being *listed* is not the same as being *usable*: press ▶ with the
-model set to **Auto** and the app probes each one first, then reports exactly why any
-model is out — `daily free quota used up`, `provider down`, `not available via plain API`
-— and spreads the batches across whatever is answering. A daily quota is an account limit
-at the provider, not a setting in this app: it resets at 00:00 UTC, or you lift it by
-adding credits at openrouter.ai.
+selectable everywhere. Which of them will actually write an article is a separate
+question — see below.
+
+## Model reliability
+
+Free-tier models fail constantly, and the app's job is to make that cheap rather than to
+pretend otherwise. Four mechanisms do that, all of them measured rather than assumed:
+
+**A per-article deadline reaches every request.** An article has a wall-clock budget; it
+now propagates into the client, so no single request is ever given more time than the
+article has left. Without this, one stalling model could spend
+`request_timeout x max_retries` on each of an article's ~13 calls — with a 19-model
+chain that is 6,840s of waiting against a 675s budget, which is exactly why articles
+"failed" after 22 minutes with a vague message. Measured on a total stall: 108s to a
+clear failure, against 675s of budget.
+
+**The fallback chain is short and health-ranked.** `max_models_per_call` (default 4)
+caps how many models one call may walk, ordered fastest-known-good first. Trying all 19
+is not resilience; it is a self-inflicted stall.
+
+**A circuit breaker benches repeat offenders.** Two consecutive hard failures and a
+model sits out for 15 minutes instead of being retried on every call. HTTP 403/404 skip
+the second chance — no retry changes a restriction.
+
+**Health checks ask for prose, not a ping.** A 1-token ping cannot tell a writer from a
+classifier: `nvidia/nemotron-3.5-content-safety` passes the ping and then answers a
+1,000-word section request with three words. That is worse than a clean failure, because
+the article proceeds with unusable text and the editor's correction loop chases it. The
+deep probe asks for real prose and marks anything that cannot produce it red.
+
+### Reading the traffic light
+
+| Colour | Meaning | What to do |
+|---|---|---|
+| 🟢 Green `#28C840` | Answering now, with measured speed | Nothing — use it |
+| 🟡 Yellow `#FEBC2E` | Daily free quota used up, or the provider is having an outage | Wait — quotas reset at 00:00 UTC, or add credits at openrouter.ai |
+| 🔴 Red `#FF5F57` | Not offered to this account, restricted to other harnesses, or not a writer | Pick a different model; this one will not work today |
+
+A daily quota is an account limit at the provider, not a setting in this app. On a free
+key most of the catalogue sits yellow most of the time — that is the tier, not a bug.
 
 ## Architecture
 
@@ -194,7 +229,7 @@ main.py / gui_app.py
 
 ## Testing
 
-13 test suites, no test framework dependency — each is a standalone script printing
+14 test suites, no test framework dependency — each is a standalone script printing
 pass/fail with a plain-English description of what it proved.
 
 ```bash
@@ -206,6 +241,7 @@ pass/fail with a plain-English description of what it proved.
 .venv/bin/python tests_hig_check.py          # macOS menu bar / keyboard-shortcut conformance
 .venv/bin/python tests_models_everywhere_check.py  # model catalogue reaches every tab, timing log, PDF has no disclaimer
 .venv/bin/python tests_sheet_rules_check.py  # column mapping, year cutoff, author byline
+.venv/bin/python tests_model_health_check.py # fail-fast bounds, circuit breaker, traffic-light states
 # ...and 5 more — see TESTING.md
 ```
 

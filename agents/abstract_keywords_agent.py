@@ -23,7 +23,8 @@ def run(state: ArticleState, config: dict, client: AIClient) -> ArticleState:
         **year_fields(state),
     )
     model, temperature = agent_model_temperature(config, "abstract_agent")
-    raw = client.chat_completion(SYSTEM_PROMPT, user_prompt, model=model, temperature=temperature)
+    raw = client.chat_completion(SYSTEM_PROMPT, user_prompt, model=model,
+                                 temperature=temperature, min_words=min_words)
 
     abstract, keywords = "", []
     if "###KEYWORDS###" in raw:

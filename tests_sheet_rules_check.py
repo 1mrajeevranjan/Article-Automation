@@ -165,7 +165,8 @@ class StubClient:
     def __init__(self):
         self.prompts = []
 
-    def chat_completion(self, system_prompt, user_prompt, model=None, temperature=None):
+    def chat_completion(self, system_prompt, user_prompt, model=None, temperature=None,
+                        min_words=None):
         self.prompts.append(user_prompt)
         low = user_prompt.lower()
         if "ieee numbered format" in low or "references section" in low:
