@@ -6,8 +6,8 @@ ai_provider:
   max_retries: 2
   max_concurrent_requests: 2
   global_max_concurrent_requests: 6
-  request_timeout_seconds: 60
-  article_timeout_seconds: 300
+  request_timeout_seconds: 120
+  seconds_per_call: 75
   provider_routing:
     ignore:
     - nvidia

@@ -316,6 +316,88 @@ def test_contention_tuning():
     print("contention tuning keeps demand within the budget and extends deadlines: OK")
 
 
+def test_article_timeout_scales_with_work():
+    """A flat budget cannot serve both a small and a large article.
+
+    Regression: 300s was generous for 5 sections/2,500 words but guaranteed failure for
+    10 sections/10,500 words — 13 calls at a measured 35-58s each. The budget is now
+    derived from sections, workers and contention.
+    """
+    from orchestrator import article_timeout_for
+
+    base = {"ai_provider": {"seconds_per_call": 75, "max_concurrent_requests": 2}}
+
+    small = article_timeout_for(5, base)
+    large = article_timeout_for(10, base)
+    assert large > small, f"a 10-section article must get more time than a 5-section one ({large} vs {small})"
+
+    # Real cost of a 10-section article measured at ~450-520s; the budget must clear it.
+    assert large >= 520, f"10-section budget {large}s is below the measured real cost"
+
+    # Fewer workers = more sequential waves = more time.
+    serial = article_timeout_for(10, {"ai_provider": dict(base["ai_provider"], max_concurrent_requests=1)})
+    assert serial > large, f"1 worker should need longer than 2 ({serial} vs {large})"
+
+    # Parallel batches stretch each article's wall clock.
+    contended = article_timeout_for(10, {"ai_provider": dict(base["ai_provider"], contention_factor=2)})
+    assert contended > large, f"2 concurrent batches should widen the budget ({contended} vs {large})"
+
+    # An explicit override still wins, for anyone who wants a hard ceiling.
+    pinned = article_timeout_for(10, {"ai_provider": dict(base["ai_provider"], article_timeout_seconds=90)})
+    assert pinned == 90, pinned
+
+    print(f"article budget scales with work: 5 sections={small}s, 10={large}s, "
+          f"10 serial={serial}s, 10 contended={contended}s, override honoured: OK")
+
+
+def test_dead_pinned_model_is_swapped(monkey_alive=("model-b:free",)):
+    """A pinned model that isn't answering must be swapped before rows are spent on it."""
+    import ai_client
+    from batch_runner import JobRunner
+
+    sheet = TMP / "deadmodel.xlsx"
+    make_sheet(sheet, 4)
+    manager = JobManager(CONFIG, lambda e: None)
+    job = manager.add_job(sheet, TMP, "model-a:free", [1], 10, 500, 5)
+
+    logs = []
+    runner = JobRunner(job, CONFIG, manager.registry, lambda e: logs.append(e),
+                       manager.request_semaphore)
+
+    original_ping = ai_client.ping_models
+    batch_runner.ping_models = lambda models, config, timeout=20: list(monkey_alive)
+    try:
+        runner._verify_model()
+    finally:
+        batch_runner.ping_models = original_ping
+
+    assert job.model == "model-b:free", f"dead model should be swapped, got {job.model}"
+    assert runner.config["free_models"] == ["model-b:free"], runner.config["free_models"]
+    assert any("not responding" in e[2] for e in logs if e[0] == "log"), logs
+    print(f"pinned dead model swapped to {job.model} before any row ran: OK")
+
+
+def test_live_pinned_model_is_kept():
+    """A model that IS answering must be left exactly as the user chose it."""
+    from batch_runner import JobRunner
+
+    sheet = TMP / "livemodel.xlsx"
+    make_sheet(sheet, 4)
+    manager = JobManager(CONFIG, lambda e: None)
+    job = manager.add_job(sheet, TMP, "model-a:free", [1], 10, 500, 5)
+    runner = JobRunner(job, CONFIG, manager.registry, lambda e: None, manager.request_semaphore)
+
+    original = batch_runner.ping_models
+    batch_runner.ping_models = lambda models, config, timeout=20: ["model-a:free", "model-b:free"]
+    try:
+        runner._verify_model()
+    finally:
+        batch_runner.ping_models = original
+
+    assert job.model == "model-a:free", f"a live pinned model must not be changed: {job.model}"
+    print("a responding pinned model is left untouched: OK")
+
+
 def test_already_done_rows_are_skipped():
     sheet = TMP / "skip.xlsx"
     make_sheet(sheet, 10)
@@ -355,6 +437,9 @@ if __name__ == "__main__":
         test_global_request_budget_respected()
         test_stopping_one_job_leaves_others_running()
         test_contention_tuning()
+        test_article_timeout_scales_with_work()
+        test_dead_pinned_model_is_swapped()
+        test_live_pinned_model_is_kept()
         test_already_done_rows_are_skipped()
     finally:
         batch_runner.run_article = original

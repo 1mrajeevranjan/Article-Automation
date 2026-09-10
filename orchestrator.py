@@ -1,4 +1,5 @@
 import logging
+import math
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -47,6 +48,39 @@ def _section_word_targets(target_word_count: int, num_middle: int):
     return intro_words, conclusion_words, middle_words
 
 
+def article_timeout_for(sections: int, config: dict) -> int:
+    """Wall-clock budget for one article, derived from the work it actually involves.
+
+    A flat number cannot serve both a 5-section/2,500-word article and a 10-section/
+    10,500-word one: the same 300s that is generous for the first guarantees failure for
+    the second. An article costs one call per middle section plus outline, intro/
+    conclusion, editor, abstract and references; middle sections run `max_concurrent_
+    requests` at a time, so the sequential cost is the number of waves, not the number
+    of calls.
+
+    Measured against live free models (2026-09-10): a ~1,100-word section takes 35s on
+    gemma-4-26b and 58s on nemotron-3-super, so `seconds_per_call` defaults to 75 to
+    leave headroom on the slower one.
+    """
+    provider = config.get("ai_provider", {})
+    override = provider.get("article_timeout_seconds")
+    if override:                       # explicit value still wins
+        return int(override)
+
+    seconds_per_call = provider.get("seconds_per_call", 75)
+    workers = max(1, provider.get("max_concurrent_requests", 2))
+    middle = max(1, sections - 2)
+
+    waves = math.ceil(middle / workers)     # middle sections, run in parallel batches
+    waves += 4                              # outline, intro/conclusion, abstract, references
+    waves += 1                              # one correction pass of headroom
+
+    # Parallel batches share the request budget, so each article's wall clock stretches.
+    contention = max(1, provider.get("contention_factor", 1))
+    budget = waves * seconds_per_call * contention
+    return int(min(max(budget, 180), 2400))
+
+
 def run_article(
     row_number: int,
     title: str,
@@ -68,7 +102,7 @@ def run_article(
     finishes — silently defeating the timeout. A plain daemon thread lets this function
     return the instant the deadline passes, and never blocks process/app shutdown if
     the abandoned call is still running years... er, minutes later."""
-    timeout = config.get("ai_provider", {}).get("article_timeout_seconds", 600)
+    timeout = article_timeout_for(sections, config)
     result: dict = {}
 
     def _worker():

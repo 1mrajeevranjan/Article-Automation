@@ -317,6 +317,8 @@ class BatchTab(ttk.Frame):
         log_bar = ttk.Scrollbar(log_frame, orient="vertical", command=self.log.yview)
         log_bar.pack(side="right", fill="y")
         self.log.configure(yscrollcommand=log_bar.set)
+        self.log.tag_configure("success", foreground="#1a7f37")
+        self.log.tag_configure("failure", foreground="#b3261e")
         ttk.Button(right, text="Clear log", command=self._clear_log).pack(anchor="e", pady=(8, 0))
 
         # A single label-column grid for Source/Batching/Run — labels share one width so
@@ -801,9 +803,29 @@ class BatchTab(ttk.Frame):
         self.log.delete("1.0", "end")
         self.log.config(state="disabled")
 
+    # Outcome markers, so a run's result is readable at a glance instead of parsed
+    # word by word out of a wall of prose.
+    _LOG_SUCCESS = ("✓", "success")
+    _LOG_FAILURE = ("✗", "failure")
+
+    def _classify(self, message: str):
+        """(glyph, tag) for a log line, or (None, None) for neutral chatter."""
+        lowered = message.lower()
+        if "success" in lowered or "finished: done" in lowered:
+            return self._LOG_SUCCESS
+        if any(word in lowered for word in
+               ("failed", "error", "stopped", "not responding", "exceeded", "unavailable")):
+            return self._LOG_FAILURE
+        return (None, None)
+
     def _log(self, message: str):
+        glyph, tag = self._classify(message)
         self.log.config(state="normal")
-        self.log.insert("end", message + "\n")
+        if glyph:
+            self.log.insert("end", f"{glyph} ", tag)
+            self.log.insert("end", message + "\n", tag)
+        else:
+            self.log.insert("end", message + "\n")
         self.log.see("end")
         self.log.config(state="disabled")
 

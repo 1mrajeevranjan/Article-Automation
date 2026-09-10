@@ -22,7 +22,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ai_client import AIClient, AIClientError
+from ai_client import AIClient, AIClientError, ping_models
 from excel_io import ExcelBatch
 from orchestrator import run_article
 
@@ -156,17 +156,53 @@ class JobRunner(threading.Thread):
         provider["max_concurrent_requests"] = min(
             provider.get("max_concurrent_requests", 2), fair_share)
 
-        base_timeout = provider.get("article_timeout_seconds", 300)
-        provider["article_timeout_seconds"] = min(base_timeout * parallel, 1800)
+        # Scale the budget by contention rather than replacing it: the per-article
+        # budget is derived from the article's own size (see orchestrator
+        # article_timeout_for), and overwriting it here re-introduced the flat number
+        # that made big 10-section articles time out on healthy models.
+        provider["contention_factor"] = parallel
+        if provider.get("article_timeout_seconds"):
+            provider["article_timeout_seconds"] = min(
+                int(provider["article_timeout_seconds"]) * parallel, 2400)
 
         if parallel > 1:
             self._log(f"{parallel} batches running — using "
-                      f"{provider['max_concurrent_requests']} section worker(s) and a "
-                      f"{provider['article_timeout_seconds']}s article budget")
+                      f"{provider['max_concurrent_requests']} section worker(s), "
+                      f"article budget scaled ×{parallel}")
+
+    def _verify_model(self):
+        """Swap off a model that isn't answering before spending rows discovering it.
+
+        A pinned model that is down (measured: gemma-4-31b:free returns 504 in ~10s,
+        every time) otherwise burns the full retry budget on every row of the batch. One
+        ~1.5s parallel ping up front replaces that with an immediate, visible switch.
+        """
+        provider = self.config["ai_provider"]
+        chain = [self.job.model] + [m for m in (self.config.get("free_models") or [])
+                                    if m != self.job.model]
+        try:
+            alive = ping_models(chain, self.config)
+        except Exception:  # noqa: BLE001 - a failed probe must not stop the run
+            return
+
+        if not alive:
+            self._log("no configured model answered the health check — trying anyway")
+            return
+
+        if self.job.model not in alive:
+            replacement = alive[0]
+            self._log(f"{self.job.model.split('/')[-1]} is not responding — "
+                      f"switching this batch to {replacement.split('/')[-1]}")
+            self.job.model = replacement
+            provider["model"] = replacement
+
+        # Keep only live models in the fallback chain, preferred order preserved.
+        self.config["free_models"] = [m for m in chain if m in alive]
 
     def run(self):
         job = self.job
         self._tune_for_contention()
+        self._verify_model()
         try:
             client = AIClient(self.config, cancel_event=job.stop_event,
                               request_semaphore=self.request_semaphore)
