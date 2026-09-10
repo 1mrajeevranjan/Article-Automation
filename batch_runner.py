@@ -261,12 +261,13 @@ class JobRunner(threading.Thread):
                 self._log(f"starting batch {batch_number}")
                 self.emit(("job_batch", job.job_id, batch_number))
 
-            row_number, title, scope, author, _status = row
-            self._log(f"row {row_number}: {title[:58]}")
+            row_number, title = row.row_number, row.title
+            self._log(f"row {row_number}: {title[:58]}"
+                      + (f" [as of {row.year}]" if row.year else ""))
 
             words, sections = job.row_overrides.get(row_number, (job.word_count, job.sections))
-            state = run_article(row_number, title, scope, author, words, sections,
-                                self.config, client, job.output_dir)
+            state = run_article(row_number, title, row.scope, row.author, words, sections,
+                                self.config, client, job.output_dir, year=row.year)
 
             if state.status == "Stopped":
                 self._set_status("Stopped", "stopped by user")

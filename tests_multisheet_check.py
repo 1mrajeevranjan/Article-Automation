@@ -44,7 +44,7 @@ def write_sheet(path: Path, rows: int, *, header_row=1, scope_header="Scope",
 
 
 def fake_run_article(row_number, title, scope, author, word_count, sections,
-                     config, client, output_dir, file_label=None):
+                     config, client, output_dir, file_label=None, year=None):
     """Writes a real file into the job's output folder so destinations are provable."""
     from state import ArticleState
     time.sleep(0.02)

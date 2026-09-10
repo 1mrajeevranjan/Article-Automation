@@ -70,7 +70,10 @@ def main():
     rendered = {}
     for iid in tab.tree.get_children():
         vals = tab.tree.item(iid, "values")
-        rendered[int(vals[1])] = {"tick": vals[0], "status": vals[5]}
+        rendered[int(vals[gui_app.COL["row"]])] = {
+            "tick": vals[gui_app.COL["include"]],
+            "status": vals[gui_app.COL["status"]],
+        }
 
     print("Rendered batch 1 (rows 2-26):")
     for row_number in sorted(rendered)[:20]:

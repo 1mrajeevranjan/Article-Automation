@@ -158,9 +158,11 @@ def main():
 
     success_count = 0
     try:
-        for i, (row_number, title, scope, author, existing_status) in enumerate(pending_rows, start=1):
-            word_count, sections = prompt_article_targets(i, len(pending_rows), title, scope, author)
-            state = run_article(row_number, title, scope, author, word_count, sections, config, client, output_dir)
+        for i, row in enumerate(pending_rows, start=1):
+            row_number, title = row.row_number, row.title
+            word_count, sections = prompt_article_targets(i, len(pending_rows), title, row.scope, row.author)
+            state = run_article(row_number, title, row.scope, row.author, word_count, sections,
+                                config, client, output_dir, year=row.year)
             batch.write_status(row_number, state.status, state.notes)
 
             rows_since_save += 1

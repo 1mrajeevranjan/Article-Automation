@@ -44,6 +44,7 @@ duration, which model served it, word count, reference count, and the PDFs writt
 .venv/bin/python tests_live_ui_check.py      # log formatting, progress counters, toggle states
 .venv/bin/python tests_multisheet_check.py   # 5 sheets -> 5 jobs -> 5 destinations; header edge cases
 .venv/bin/python tests_models_everywhere_check.py  # catalogue reaches every tab; stage timings; no PDF disclaimer
+.venv/bin/python tests_sheet_rules_check.py  # Title vs Subject Area; Year cutoff on prose + citations; multi-column authors
 ```
 
 ## Parallel Runs

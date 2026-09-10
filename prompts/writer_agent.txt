@@ -10,6 +10,8 @@ Write the section titled "{section_heading}" at approximately {target_words} wor
 
 {style_section_guidance}
 
+{year_constraint}
+
 Additional rules:
 - Open by framing this section's purpose, then develop it from general concepts toward specifics.
 - Introduce terminology before using it; do not assume undefined jargon.

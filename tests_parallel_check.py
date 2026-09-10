@@ -72,7 +72,7 @@ def statuses_of(path: Path) -> dict:
 def fake_run_article_factory(delay=0.02, fail_rows=(), models_seen=None, inflight=None):
     """Replaces orchestrator.run_article so tests never touch the network."""
     def fake(row_number, title, scope, author, word_count, sections,
-             config, client, output_dir, file_label=None):
+             config, client, output_dir, file_label=None, year=None):
         if models_seen is not None:
             models_seen.append(config["ai_provider"]["model"])
         if inflight is not None:

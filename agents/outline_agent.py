@@ -1,6 +1,6 @@
 from ai_client import AIClient
 from state import ArticleState
-from agents._prompts import load_prompt, agent_model_temperature, style_fields
+from agents._prompts import load_prompt, agent_model_temperature, style_fields, year_fields
 
 SYSTEM_PROMPT = "You produce clean, logically ordered article outlines. Follow instructions exactly."
 
@@ -13,6 +13,7 @@ def run(state: ArticleState, config: dict, client: AIClient) -> ArticleState:
         scope=state.scope,
         num_middle_sections=num_middle,
         **style_fields(config),
+        **year_fields(state),
     )
     model, temperature = agent_model_temperature(config, "outline_agent")
     raw = client.chat_completion(SYSTEM_PROMPT, user_prompt, model=model, temperature=temperature)

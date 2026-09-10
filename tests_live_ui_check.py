@@ -38,7 +38,7 @@ def make_sheet(path, rows=20):
 
 
 def fake_run_article(row_number, title, scope, author, word_count, sections,
-                     config, client, output_dir, file_label=None):
+                     config, client, output_dir, file_label=None, year=None):
     from state import ArticleState
     time.sleep(0.03)
     st = ArticleState(row_number=row_number, title=title, scope=scope, author=author,
@@ -64,7 +64,7 @@ def test_row_status_updates_live():
     # Batch 1 (rows 2-11) is the one on screen. Run batch 1 and watch the table.
     displayed = [int(tab.tree.item(i, "values")[1]) for i in tab.tree.get_children()]
     assert displayed[0] == 2, displayed[:3]
-    assert tab.tree.item("2", "values")[5] == "Pending", tab.tree.item("2", "values")
+    assert tab.tree.item("2", "values")[gui_app.COL["status"]] == "Pending", tab.tree.item("2", "values")
 
     tab._start_one_batch(1, model="m1:free")
 
@@ -73,7 +73,7 @@ def test_row_status_updates_live():
     deadline = time.time() + 30
     while time.time() < deadline and app.job_manager.any_running():
         app.update()
-        if tab.tree.item("2", "values")[5] == "Done":
+        if tab.tree.item("2", "values")[gui_app.COL["status"]] == "Done":
             seen_done_midflight = True
             break
         time.sleep(0.05)

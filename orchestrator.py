@@ -92,6 +92,7 @@ def run_article(
     client: AIClient,
     output_dir: Path,
     file_label: str | None = None,
+    year: int | None = None,
 ) -> ArticleState:
     """Public entry point — enforces a hard wall-clock ceiling so one stuck article
     (e.g. a provider call that hangs past its own timeout/retry budget) can never
@@ -107,7 +108,8 @@ def run_article(
 
     def _worker():
         result["state"] = _run_article_inner(
-            row_number, title, scope, author, word_count, sections, config, client, output_dir, file_label
+            row_number, title, scope, author, word_count, sections, config, client,
+            output_dir, file_label, year,
         )
 
     thread = threading.Thread(target=_worker, daemon=True)
@@ -118,7 +120,7 @@ def run_article(
         logger.error("Row %s (%s) exceeded %ss overall timeout — abandoning, batch continues", row_number, title, timeout)
         state = ArticleState(
             row_number=row_number, title=title, scope=scope, author=author,
-            target_word_count=word_count, target_sections=sections,
+            target_word_count=word_count, target_sections=sections, year=year,
         )
         state.status = "Failed"
         state.notes = (f"Exceeded overall article timeout ({timeout}s) — the provider "
@@ -139,6 +141,7 @@ def _run_article_inner(
     client: AIClient,
     output_dir: Path,
     file_label: str | None = None,
+    year: int | None = None,
 ) -> ArticleState:
     state = ArticleState(
         row_number=row_number,
@@ -147,6 +150,7 @@ def _run_article_inner(
         author=author,
         target_word_count=word_count,
         target_sections=sections,
+        year=year,
     )
 
     stage_t0 = time.time()

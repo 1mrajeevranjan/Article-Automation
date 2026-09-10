@@ -25,6 +25,11 @@ CHECKED = "☑"
 UNCHECKED = "☐"
 AUTO_MODEL = "Auto — spread across models"
 
+# The rows table's columns, named so nothing addresses them by a bare integer.
+ROW_COLUMNS = ("include", "row", "title", "year", "word_count", "sections", "status")
+COL = {name: i for i, name in enumerate(ROW_COLUMNS)}
+TREE_COL = {name: f"#{i + 1}" for i, name in enumerate(ROW_COLUMNS)}   # Tk's 1-based ids
+
 logger = logging.getLogger("gui_app")
 
 
@@ -422,11 +427,11 @@ class BatchTab(ttk.Frame):
 
         tree_frame = ttk.Frame(left)
         tree_frame.pack(fill="both", expand=True, pady=(12, 0))
-        columns = ("include", "row", "title", "word_count", "sections", "status")
-        self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=10)
+        self.tree = ttk.Treeview(tree_frame, columns=ROW_COLUMNS, show="headings", height=10)
         # Everything centred, including Title, so the columns read as one aligned block.
         for col, label, width in [
-            ("include", "Run?", 46), ("row", "Row", 48), ("title", "Title", 260),
+            ("include", "Run?", 46), ("row", "Row", 48), ("title", "Title", 240),
+            ("year", "Year", 54),
             ("word_count", "Word Count", 84), ("sections", "Sections", 68), ("status", "Status", 110),
         ]:
             self.tree.heading(col, text=label, anchor="center")
@@ -727,8 +732,8 @@ class BatchTab(ttk.Frame):
             return   # that row belongs to a batch that isn't on screen
         done = str(status).startswith("Success")
         values = list(self.tree.item(iid, "values"))
-        values[0] = UNCHECKED if done else CHECKED
-        values[5] = "Done" if done else status
+        values[COL["include"]] = UNCHECKED if done else CHECKED
+        values[COL["status"]] = "Done" if done else status
         self.tree.item(iid, values=values)
         self.included[row_number] = not done
 
@@ -972,7 +977,8 @@ class BatchTab(ttk.Frame):
         self.tree.delete(*self.tree.get_children())
         self.row_overrides = {}
         self.included = {}
-        for row_number, title, scope, author, _snapshot_status in self.pending_rows:
+        for row in self.pending_rows:
+            row_number = row.row_number
             wc, sec = defaults["word_count"], defaults["sections"]
             self.row_overrides[row_number] = (wc, sec)
             status = statuses.get(row_number, "")
@@ -983,7 +989,8 @@ class BatchTab(ttk.Frame):
             display_status = "Done" if already_done else (status or "Pending")
             self.tree.insert("", "end", iid=str(row_number),
                              values=(UNCHECKED if already_done else CHECKED,
-                                     row_number, title, wc, sec, display_status))
+                                     row_number, row.title, row.year or "—",
+                                     wc, sec, display_status))
 
         to_run = sum(1 for v in self.included.values() if v)
         done = len(self.included) - to_run
@@ -995,12 +1002,12 @@ class BatchTab(ttk.Frame):
         for row_number in list(self.included):
             self.included[row_number] = included
             values = list(self.tree.item(str(row_number), "values"))
-            values[0] = CHECKED if included else UNCHECKED
+            values[COL["include"]] = CHECKED if included else UNCHECKED
             self.tree.item(str(row_number), values=values)
 
     def _on_single_click(self, event):
         """Toggle the Run? checkbox when its cell is clicked."""
-        if self.tree.identify_column(event.x) != "#1":
+        if self.tree.identify_column(event.x) != TREE_COL["include"]:
             return
         item = self.tree.identify_row(event.y)
         if not item or self._tab_busy():
@@ -1008,7 +1015,7 @@ class BatchTab(ttk.Frame):
         row_number = int(item)
         self.included[row_number] = not self.included.get(row_number, True)
         values = list(self.tree.item(item, "values"))
-        values[0] = CHECKED if self.included[row_number] else UNCHECKED
+        values[COL["include"]] = CHECKED if self.included[row_number] else UNCHECKED
         self.tree.item(item, values=values)
 
     def _refresh_defaults(self):
@@ -1026,8 +1033,8 @@ class BatchTab(ttk.Frame):
         for row_number, *_ in self.pending_rows:
             self.row_overrides[row_number] = (wc, sec)
             values = list(self.tree.item(str(row_number), "values"))
-            values[2] = wc
-            values[3] = sec
+            values[COL["word_count"]] = wc
+            values[COL["sections"]] = sec
             self.tree.item(str(row_number), values=values)
 
         self._log(f"Refreshed defaults from Settings: word count={wc}, sections={sec}.")
@@ -1035,9 +1042,8 @@ class BatchTab(ttk.Frame):
     def _edit_cell(self, event):
         item = self.tree.identify_row(event.y)
         column = self.tree.identify_column(event.x)
-        # Columns are (include, row, title, word_count, sections, status) — only the
-        # word_count (#4) and sections (#5) cells are editable.
-        if not item or column not in ("#4", "#5"):
+        # Only Word Count and Sections are editable; Title/Year come from the sheet.
+        if not item or column not in (TREE_COL["word_count"], TREE_COL["sections"]):
             return
         col_index = int(column[1:]) - 1
         x, y, w, h = self.tree.bbox(item, column)
@@ -1059,7 +1065,7 @@ class BatchTab(ttk.Frame):
             self.tree.item(item, values=values)
             row_number = int(item)
             wc, sec = self.row_overrides[row_number]
-            if col_index == 3:  # word_count column
+            if col_index == COL["word_count"]:
                 wc = new_value
             else:               # sections column
                 sec = max(3, new_value)
@@ -1107,7 +1113,7 @@ class BatchTab(ttk.Frame):
             messagebox.showwarning("Row unavailable", "That row isn't part of the current batch.")
             return
 
-        _, title, scope, author, _status = row
+        title, scope, author, year = row.title, row.scope, row.author, row.year
         word_count, sections = self.row_overrides[row_number]
         label = self._next_regen_label(row_number)
 
@@ -1124,7 +1130,8 @@ class BatchTab(ttk.Frame):
         def _regen_worker():
             try:
                 state = run_article(row_number, title, scope, author, word_count, sections,
-                                    config, client, self.output_dir, file_label=label)
+                                    config, client, self.output_dir, file_label=label,
+                                    year=year)
                 self.regen_queue.put((label, state.status, state.notes))
             except Exception as exc:  # noqa: BLE001 - always report, never hang
                 logger.exception("Regeneration crashed")

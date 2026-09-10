@@ -12,7 +12,7 @@ Excel file row by row so any run can be stopped and resumed exactly where it lef
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
-![Tests](https://img.shields.io/badge/tests-12%20suites-brightgreen)
+![Tests](https://img.shields.io/badge/tests-13%20suites-brightgreen)
 
 ## Features
 
@@ -38,6 +38,9 @@ Excel file row by row so any run can be stopped and resumed exactly where it lef
 - **Flexible spreadsheet reading** — finds the header row even when it isn't row 1,
   accepts common column-name variants (`Synopsis`/`Brief`/`Description` all resolve to
   `Scope`), and skips repeated header rows in sheets grouped by author/section.
+- **Sheet columns carry meaning** — only `Title` and `Scope` drive the writing; a `Year`
+  column becomes a hard knowledge and citation cutoff, and any number of author columns
+  merge into the PDF byline. See [Excel Format](#excel-format).
 
 ## Requirements
 
@@ -77,13 +80,33 @@ Then either:
 One row per article. Column names are matched case-insensitively and by common synonym
 — you don't need to rename your sheet to fit the tool.
 
-| Column | Required | Accepted names |
-|---|---|---|
-| Title | yes | Title, Article Title, Proposed Article Title, Topic, Paper Title, Headline |
-| Scope | yes | Scope, Synopsis, Brief, Description, Summary, Abstract, Details, Outline |
-| Author | no | Author, Writer, Authors |
-| Status | auto-added | written back by the app: `Pending` / `Success` / `Failed` |
-| Notes | auto-added | error detail or output filename |
+| Column | Required | What it does | Accepted names |
+|---|---|---|---|
+| Title | yes | **Drives generation.** Shown in the rows table and used as the PDF title and filename. | Title, Article Title, Proposed Article Title, Paper Title, Headline, Topic |
+| Scope | yes | **Drives generation.** The brief the article is written from. | Synopsis, Scope, Brief, Description, Summary, Abstract, Details, Outline |
+| Year | no | Knowledge and citation cutoff — see below. | Year, Publication Year, Target Year, Cutoff Year |
+| Author | no | Printed as the byline, between the title and the abstract. | Author Names, Author Name, Authors, Author, Co-Authors, Writer |
+| Subject | no | **Ignored.** Recognised only so it can't be mistaken for the title. | Subject Area, Subject, Domain, Discipline, Category, Field |
+| Status | auto-added | written back by the app: `Pending` / `Success` / `Failed` | |
+| Notes | auto-added | error detail or output filename | |
+
+Column order doesn't matter, and extra columns are ignored.
+
+**Only Title and Scope feed the writing.** Everything else is metadata. This matters:
+a sheet whose first column is `Subject Area` used to have that column matched as the
+title, so every article was written about "Machine Learning" rather than its actual
+subject. Header matching now scores an exact name above a partial one, so the real
+`Title` column wins no matter what sits to its left.
+
+**Year is a hard cutoff, in both directions.** When a row has a year, the article is
+written as though the present year is that year — only research, methods and events
+known by then — and **every reference must carry a publication year at or before it**.
+That second half is enforced, not merely requested: citations dated after the cutoff are
+discarded, replacements are requested, and the surviving list is renumbered so `[1]`…
+`[20]` stays contiguous. Rows with an empty Year cell are unconstrained.
+
+**Authors can span several columns.** `Author Name 1`, `Author Name 2`, `Co-Authors` are
+all collected, split on `;` `,` and "and", de-duplicated, and joined into one byline.
 
 The header row doesn't have to be row 1 — it's located automatically within the first 10
 rows, so a title/author line above the header is fine. A repeated header row (common in
@@ -171,7 +194,7 @@ main.py / gui_app.py
 
 ## Testing
 
-12 test suites, no test framework dependency — each is a standalone script printing
+13 test suites, no test framework dependency — each is a standalone script printing
 pass/fail with a plain-English description of what it proved.
 
 ```bash
@@ -182,6 +205,7 @@ pass/fail with a plain-English description of what it proved.
 .venv/bin/python tests_resume_check.py       # stop/resume from the exact failure point
 .venv/bin/python tests_hig_check.py          # macOS menu bar / keyboard-shortcut conformance
 .venv/bin/python tests_models_everywhere_check.py  # model catalogue reaches every tab, timing log, PDF has no disclaimer
+.venv/bin/python tests_sheet_rules_check.py  # column mapping, year cutoff, author byline
 # ...and 5 more — see TESTING.md
 ```
 

@@ -36,7 +36,7 @@ def make_sheet(path, rows=30):
 
 
 def slow_run_article(row_number, title, scope, author, word_count, sections,
-                     config, client, output_dir, file_label=None):
+                     config, client, output_dir, file_label=None, year=None):
     from state import ArticleState
     time.sleep(0.05)
     st = ArticleState(row_number=row_number, title=title, scope=scope, author=author,

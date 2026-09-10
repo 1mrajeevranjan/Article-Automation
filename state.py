@@ -9,6 +9,7 @@ class ArticleState:
     author: str = ""
     target_word_count: int = 0
     target_sections: int = 0
+    year: int | None = None   # knowledge/citation cutoff from the sheet's Year column
 
     outline: list[str] = field(default_factory=list)   # middle-section headings only
     section_drafts: dict[str, str] = field(default_factory=dict)  # heading -> text

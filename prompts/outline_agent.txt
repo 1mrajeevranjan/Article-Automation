@@ -13,4 +13,6 @@ Headings must:
 Title: {title}
 Scope: {scope}
 
+{year_constraint}
+
 Output ONLY the headings, one per line, no numbering, no extra commentary.

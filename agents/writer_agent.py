@@ -1,6 +1,6 @@
 from ai_client import AIClient
 from state import ArticleState
-from agents._prompts import load_prompt, agent_model_temperature, style_fields
+from agents._prompts import load_prompt, agent_model_temperature, style_fields, year_fields
 
 SYSTEM_PROMPT = "You write focused, on-topic article sections. Follow the target word count and instructions closely."
 
@@ -28,6 +28,7 @@ def run(
         target_words=target_words,
         mode_instruction=_MODE_INSTRUCTIONS.get(mode, ""),
         **style_fields(config),
+        **year_fields(state),
     )
     model, temperature = agent_model_temperature(config, "writer_agent")
     text = client.chat_completion(SYSTEM_PROMPT, user_prompt, model=model, temperature=temperature)
