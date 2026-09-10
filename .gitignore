@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+run_log.txt
+output_log.xlsx
+_manual_test_output/
+.DS_Store
+gui_launch.log
+build/
+dist/
+*.egg-info/

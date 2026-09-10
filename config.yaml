@@ -1,0 +1,41 @@
+ai_provider:
+  base_url: https://openrouter.ai/api/v1
+  api_key_env: AI_API_KEY
+  model: google/gemma-4-26b-a4b-it:free
+  temperature: 0.7
+  max_retries: 2
+  max_concurrent_requests: 2
+  global_max_concurrent_requests: 6
+  request_timeout_seconds: 60
+  article_timeout_seconds: 300
+  provider_routing:
+    ignore:
+    - nvidia
+agents:
+  outline_agent: {}
+  writer_agent: {}
+  editor_agent:
+    temperature: 0.3
+  abstract_agent: {}
+  references_agent: {}
+excel_save_every_n_rows: 1
+max_consecutive_failures: 3
+validation:
+  word_count_tolerance_percent: 10
+  max_correction_passes: 3
+abstract:
+  min_words: 150
+  max_words: 200
+writing_style: ieee_paper
+pdf:
+  font: Palatino
+  page_size: A4
+defaults:
+  word_count: 10500
+  sections: 10
+free_models:
+- google/gemma-4-26b-a4b-it:free
+- nvidia/nemotron-3-super-120b-a12b:free
+- google/gemma-4-31b-it:free
+- poolside/laguna-xs-2.1:free
+window_geometry: 1120x800+34+67

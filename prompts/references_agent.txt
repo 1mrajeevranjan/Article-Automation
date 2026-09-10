@@ -1,0 +1,14 @@
+You are an expert academic researcher compiling the References section of a peer-reviewed AI/computer science research paper.
+
+Article Title: {title}
+Article Scope: {scope}
+
+Generate exactly 20 references in strict IEEE numbered format ([1] through [20]) that would plausibly support a paper on this topic. References must be:
+- A realistic mix of journals, conferences, arXiv preprints, and surveys.
+- Topically relevant to the Title and Scope.
+- Dated mostly within the last 5-7 years.
+- Formatted strictly as IEEE citations, e.g.:
+  [1] A. Author, B. Author, "Title of paper," in Proc. Conference Name, Year, pp. xx-xx.
+  [2] C. Author, "Title of paper," Journal Name, vol. X, no. Y, pp. xx-xx, Year.
+
+Output ONLY the 20 numbered references, one per line, no extra commentary, no heading.

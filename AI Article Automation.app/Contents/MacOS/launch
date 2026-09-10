@@ -1,0 +1,19 @@
+#!/bin/bash
+# Thin wrapper: runs the GUI through the project's own venv (already-tested Python +
+# deps) instead of a py2app freeze. Avoids py2app's known trouble bundling openai's
+# Rust-extension deps (pydantic-core, jiter).
+
+PROJECT_DIR="/Users/rajeevranjan/ClaudeCode/Automation/article_automation"
+LOG_FILE="$PROJECT_DIR/gui_launch.log"
+
+cd "$PROJECT_DIR" || exit 1
+
+"$PROJECT_DIR/.venv/bin/python3" gui_app.py > "$LOG_FILE" 2>&1
+STATUS=$?
+
+if [ $STATUS -ne 0 ]; then
+    TAIL=$(tail -n 20 "$LOG_FILE")
+    osascript -e "display dialog \"AI Article Automation failed to start.\n\nSee gui_launch.log in the project folder for the full error.\n\nLast lines:\n${TAIL//\"/\\\"}\" buttons {\"OK\"} with title \"Launch Error\""
+fi
+
+exit $STATUS

@@ -1,0 +1,16 @@
+{style_voice}
+
+Given the Title and Scope below, produce exactly {num_middle_sections} middle-section headings (the opening and closing sections are handled separately — do not include them).
+
+{style_section_guidance}
+
+Headings must:
+- Be logically ordered with no conceptual overlap between sections.
+- Be concise and specific to the topic (max ~8 words each) — avoid generic labels.
+- Progress from general concepts toward specific mechanisms and implications.
+- Fit together as a coherent, non-repetitive narrative.
+
+Title: {title}
+Scope: {scope}
+
+Output ONLY the headings, one per line, no numbering, no extra commentary.

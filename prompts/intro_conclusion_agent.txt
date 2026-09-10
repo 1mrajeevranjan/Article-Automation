@@ -1,0 +1,16 @@
+{style_voice}
+
+Title: {title}
+Scope: {scope}
+Finished body sections (in order):
+{body_sections}
+
+Write two things that accurately frame and close the body above:
+1. Opening section (~{intro_words} words) — establish the topic and why it matters, situate it against existing approaches, and set up what follows. Introduce terminology that later sections rely on.
+2. Closing section (~{conclusion_words} words) — synthesize the key points and takeaways, and note limitations or implications, without introducing new claims unsupported by the body.
+
+Output in EXACTLY this format, nothing else:
+###INTRODUCTION###
+<opening section text>
+###CONCLUSION###
+<closing section text>

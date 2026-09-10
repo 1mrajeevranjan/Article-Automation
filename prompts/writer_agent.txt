@@ -1,0 +1,19 @@
+{style_voice}
+
+Title: {title}
+Scope: {scope}
+Full outline (for context, so your section stays consistent with the others and does not repeat their content): {outline}
+
+{mode_instruction}
+
+Write the section titled "{section_heading}" at approximately {target_words} words.
+
+{style_section_guidance}
+
+Additional rules:
+- Open by framing this section's purpose, then develop it from general concepts toward specifics.
+- Introduce terminology before using it; do not assume undefined jargon.
+- Maintain continuity with the rest of the outline; do not repeat content covered by other sections.
+- Do not summarize or preview sections that come later in the outline.
+
+Output ONLY the section body text (no heading, no markdown, no commentary).

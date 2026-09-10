@@ -1,0 +1,15 @@
+{style_voice}
+
+Title: {title}
+Final body text:
+{body}
+
+Produce:
+1. A summary of {min_words}-{max_words} words as a SINGLE paragraph (no line breaks). {style_abstract_guidance}
+2. Exactly 10 keywords relevant to the title and content, comma-separated.
+
+Output in EXACTLY this format, nothing else:
+###ABSTRACT###
+<summary text>
+###KEYWORDS###
+<keyword1, keyword2, ..., keyword10>
