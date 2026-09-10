@@ -19,6 +19,7 @@ class ArticleState:
     references: list[str] = field(default_factory=list)  # AI-generated IEEE-style citations — not verified real sources
 
     word_count_history: list[int] = field(default_factory=list)
+    stage_timings: list[tuple[str, float]] = field(default_factory=list)  # (stage, seconds)
     status: str = "Pending"
     notes: str = ""
 

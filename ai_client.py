@@ -40,18 +40,17 @@ class CancelledError(AIClientError):
 _DAILY_CAP_MARKERS = ("free-models-per-day", "per-day", "daily limit")
 
 
-def ping_models(models, config: dict, timeout: int = 20) -> list[str]:
-    """Returns the subset of `models` that answer a one-token request right now.
+def probe_models(models, config: dict, timeout: int = 20) -> dict:
+    """Returns {model: (is_alive, reason)} — the reason matters to the user.
 
-    Spreading parallel batches across models only helps if those models are actually
-    alive: measured live, most :free entries answer 429 (per-day cap) or 502, so a blind
-    round-robin hands batches to dead endpoints. Pings run concurrently and are hard
-    bounded, so the check costs a couple of seconds regardless of how many are dead.
+    "Unavailable" is not actionable; "out of today's free quota, add credits" and
+    "upstream returned 504" call for completely different responses. Measured on the
+    live catalogue, most failures are the former.
     """
     provider = config["ai_provider"]
     api_key = os.environ.get(provider["api_key_env"], "")
     if not api_key or not models:
-        return list(models)
+        return {m: (True, "") for m in models}
 
     url = provider["base_url"].rstrip("/") + "/chat/completions"
 
@@ -68,20 +67,49 @@ def ping_models(models, config: dict, timeout: int = 20) -> list[str]:
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 payload = json.load(response)
-            if payload.get("error") or not payload.get("choices"):
-                return model, False
-            return model, True
-        except Exception:  # noqa: BLE001 - any failure means "don't route work here"
-            return model, False
+            if payload.get("error"):
+                return model, (False, _classify_reason(None, str(payload["error"])))
+            if not payload.get("choices"):
+                return model, (False, "empty response")
+            return model, (True, "")
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = json.loads(exc.read()).get("error", {}).get("message", "")
+            except Exception:  # noqa: BLE001
+                pass
+            return model, (False, _classify_reason(exc.code, detail))
+        except Exception as exc:  # noqa: BLE001
+            return model, (False, type(exc).__name__)
 
-    alive: list[str] = []
-    with ThreadPoolExecutor(max_workers=min(len(models), 8)) as pool:
-        for model, ok in pool.map(probe, models):
-            if ok:
-                alive.append(model)
+    results: dict = {}
+    with ThreadPoolExecutor(max_workers=min(len(models), 10)) as pool:
+        for model, outcome in pool.map(probe, models):
+            results[model] = outcome
+    return results
 
-    # Preserve the configured preference order rather than completion order.
-    return [m for m in models if m in set(alive)]
+
+def _classify_reason(status_code, detail: str) -> str:
+    """Turns a provider error into a short phrase a user can act on."""
+    text = (detail or "").lower()
+    if status_code == 429 or "rate limit" in text or "per-day" in text:
+        return "daily free quota used up"
+    if status_code == 403 or "only available on" in text:
+        return "not available via plain API"
+    if status_code in (502, 503, 504) or "aborted" in text or "timed out" in text:
+        return "provider down"
+    if status_code == 404:
+        return "model not offered"
+    return (detail or "unavailable")[:60]
+
+
+def ping_models(models, config: dict, timeout: int = 20) -> list[str]:
+    """The subset of `models` answering right now, in the caller's preference order.
+
+    Thin wrapper over probe_models for callers that only need the live set.
+    """
+    results = probe_models(models, config, timeout=timeout)
+    return [m for m in models if results.get(m, (True, ""))[0]]
 
 
 class AIClient:

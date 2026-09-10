@@ -31,6 +31,13 @@ logger = logging.getLogger("batch_runner")
 MAX_PARALLEL_JOBS = 5
 
 
+def _mmss(seconds: float) -> str:
+    """Durations here run from a few seconds to several minutes — 4m12s reads faster
+    than 252.3s at the exact point the user is scanning the log for the slow stage."""
+    seconds = int(round(seconds))
+    return f"{seconds}s" if seconds < 60 else f"{seconds // 60}m{seconds % 60:02d}s"
+
+
 class WorkbookRegistry:
     """Shares one ExcelBatch (and one lock) per resolved file path."""
 
@@ -271,8 +278,12 @@ class JobRunner(threading.Thread):
                 job.done_rows += 1
                 consecutive_failures = 0
                 served = getattr(client, "last_model", None)
-                self._log(f"row {row_number}: {state.status}"
+                total = sum(seconds for _, seconds in state.stage_timings)
+                self._log(f"row {row_number}: {state.status} in {_mmss(total)}"
                           + (f" [via {served}]" if served else ""))
+                if state.stage_timings:
+                    self._log("    " + " · ".join(
+                        f"{stage} {_mmss(seconds)}" for stage, seconds in state.stage_timings))
             else:
                 job.failed_rows += 1
                 consecutive_failures += 1

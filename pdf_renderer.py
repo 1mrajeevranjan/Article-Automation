@@ -73,7 +73,6 @@ def _styles(font: str):
                                    fontSize=14, alignment=TA_LEFT, spaceBefore=14, spaceAfter=6),
         "body": ParagraphStyle("Body", fontName=variants["regular"], fontSize=11, alignment=TA_JUSTIFY, spaceAfter=8, leading=15),
         "reference": ParagraphStyle("Reference", fontName=variants["regular"], fontSize=10, alignment=TA_LEFT, spaceAfter=4, leading=13),
-        "disclaimer": ParagraphStyle("Disclaimer", fontName=variants["italic"], fontSize=9, alignment=TA_LEFT, spaceBefore=8, textColor="#B00020"),
     }
 
 
@@ -122,12 +121,11 @@ def render_pdf(state: ArticleState, output_dir: Path, pdf_cfg: dict, file_label:
     story.append(Paragraph(escape(state.conclusion), styles["body"]))
 
     if state.references:
+        # No in-document disclaimer: the PDF is a submission draft, and the caveat
+        # belongs to the author's workflow, not the page. References are AI-generated
+        # and unverified — README and the app's own warning carry that, see
+        # ArticleState.references.
         story.append(Paragraph("References", styles["heading"]))
-        story.append(Paragraph(
-            "AI-generated for illustrative structure only — NOT verified real sources. "
-            "Verify or replace every citation before any academic submission.",
-            styles["disclaimer"],
-        ))
         for ref in state.references:
             story.append(Paragraph(escape(ref), styles["reference"]))
 

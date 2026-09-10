@@ -154,7 +154,11 @@ def _run_article_inner(
     def _mark(stage: str):
         nonlocal stage_t0
         now = time.time()
-        logger.info("Row %s: %s done in %.1fs", row_number, stage, now - stage_t0)
+        elapsed = now - stage_t0
+        logger.info("Row %s: %s done in %.1fs", row_number, stage, elapsed)
+        # Kept on the state so the GUI can show where an article's minutes went;
+        # the logger alone only reaches the log file, not the on-screen log.
+        state.stage_timings.append((stage, elapsed))
         stage_t0 = now
 
     try:

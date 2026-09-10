@@ -12,7 +12,7 @@ Excel file row by row so any run can be stopped and resumed exactly where it lef
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
-![Tests](https://img.shields.io/badge/tests-11%20suites-brightgreen)
+![Tests](https://img.shields.io/badge/tests-12%20suites-brightgreen)
 
 ## Features
 
@@ -114,13 +114,23 @@ defaults:
   word_count: 10500
   sections: 10                     # includes Introduction + Conclusion
 
-free_models:                       # fallback chain, in preference order
+free_models:                       # full provider catalogue, working models first
   - google/gemma-4-26b-a4b-it:free
   - nvidia/nemotron-3-super-120b-a12b:free
+  # ...every :free model the provider offers
 ```
 
 Everything here is also editable from the app's **Settings** tab — the file is the
 source of truth either way.
+
+**Settings → Fetch free models** pulls the provider's live `:free` catalogue, writes it
+to `free_models`, and pushes it into every open sheet tab, so the same complete list is
+selectable everywhere. Being *listed* is not the same as being *usable*: press ▶ with the
+model set to **Auto** and the app probes each one first, then reports exactly why any
+model is out — `daily free quota used up`, `provider down`, `not available via plain API`
+— and spreads the batches across whatever is answering. A daily quota is an account limit
+at the provider, not a setting in this app: it resets at 00:00 UTC, or you lift it by
+adding credits at openrouter.ai.
 
 ## Architecture
 
@@ -161,7 +171,7 @@ main.py / gui_app.py
 
 ## Testing
 
-11 test suites, no test framework dependency — each is a standalone script printing
+12 test suites, no test framework dependency — each is a standalone script printing
 pass/fail with a plain-English description of what it proved.
 
 ```bash
@@ -171,6 +181,7 @@ pass/fail with a plain-English description of what it proved.
 .venv/bin/python tests_multisheet_check.py   # 5 sheets → 5 jobs → 5 destinations, header edge cases
 .venv/bin/python tests_resume_check.py       # stop/resume from the exact failure point
 .venv/bin/python tests_hig_check.py          # macOS menu bar / keyboard-shortcut conformance
+.venv/bin/python tests_models_everywhere_check.py  # model catalogue reaches every tab, timing log, PDF has no disclaimer
 # ...and 5 more — see TESTING.md
 ```
 
@@ -194,8 +205,12 @@ design: see **[TESTING.md](TESTING.md)**.
   the full list of what native AppKit could do here that Tk cannot (vibrancy, Quick Look,
   Spotlight indexing, Share menu, App Intents).
 - **References are AI-generated, not real citations** — when `writing_style: ieee_paper`
-  is active, the References section is clearly disclaimed in the PDF as illustrative
-  structure only. Verify or replace every citation before any academic submission.
+  is active, the References section is produced by a language model. The citations follow
+  IEEE formatting but are **not verified against real publications**: authors, titles,
+  venues, years and DOIs may not exist. **Verify or replace every citation before any
+  academic submission.** The PDF deliberately carries no printed disclaimer — it is a
+  submission draft, so the caveat lives here and in the app rather than on the page. That
+  choice moves the responsibility to you; it does not reduce it.
 - **Free-tier model reliability varies** — daily quotas and upstream outages are real and
   outside this app's control. The fallback chain and health-check probe exist because of
   this, not as decoration.

@@ -40,6 +40,10 @@ duration, which model served it, word count, reference count, and the PDFs writt
 .venv/bin/python tests_parallel_check.py     # multi-job engine: concurrency safety, queueing, budget, cap
 .venv/bin/python tests_parallel_gui_check.py # batch-spec parsing, job wiring, 5-job ceiling
 .venv/bin/python tests_scroll_check.py       # Settings tab layout fits / scrolls
+.venv/bin/python tests_hig_check.py          # macOS menu bar / keyboard-shortcut conformance
+.venv/bin/python tests_live_ui_check.py      # log formatting, progress counters, toggle states
+.venv/bin/python tests_multisheet_check.py   # 5 sheets -> 5 jobs -> 5 destinations; header edge cases
+.venv/bin/python tests_models_everywhere_check.py  # catalogue reaches every tab; stage timings; no PDF disclaimer
 ```
 
 ## Parallel Runs

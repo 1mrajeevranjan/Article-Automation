@@ -12,7 +12,7 @@ from tkinter import ttk, filedialog, messagebox
 from dotenv import load_dotenv
 
 import config_manager
-from ai_client import AIClient, AIClientError, ping_models
+from ai_client import AIClient, AIClientError, probe_models
 from batch_runner import JobManager, MAX_PARALLEL_JOBS, partition_batches
 from excel_io import ExcelBatch, MissingColumnsError
 from orchestrator import run_article
@@ -46,9 +46,10 @@ class SettingsTab(ttk.Frame):
     """Scrollable — the form is taller than the window, and a Save button that's
     scrolled out of view is a Save button that never gets clicked."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, on_models_changed=None):
         super().__init__(parent)
         self.config = config_manager.load_config()
+        self.on_models_changed = on_models_changed
         self.vars = {}
 
         canvas = tk.Canvas(self, highlightthickness=0)
@@ -218,8 +219,17 @@ class SettingsTab(ttk.Frame):
             self.model_status.config(text="No :free models returned by provider", foreground="red")
             return
 
+        # Persist immediately rather than waiting for Save: every sheet tab reads its
+        # model list from config["free_models"], so a fetch that only updated this combo
+        # left the sheet tabs offering the stale handful they were shipped with.
+        self.config["free_models"] = models
+        config_manager.save_config(self.config)
+
         self.model_combo.config(values=models)
-        self.model_status.config(text=f"{len(models)} free models loaded — pick one above", foreground="green")
+        self.model_status.config(text=f"{len(models)} free models loaded — available in every sheet tab",
+                                 foreground="green")
+        if self.on_models_changed is not None:
+            self.on_models_changed()
 
     def _save(self):
         try:
@@ -472,11 +482,22 @@ class BatchTab(ttk.Frame):
         candidates = list(cfg.get("free_models") or [cfg["ai_provider"]["model"]])
         self.parallel_status.config(text="checking models…", foreground="gray")
         self.update_idletasks()
-        alive = ping_models(candidates, cfg)
-        dead = [m for m in candidates if m not in alive]
-        if dead:
-            self._log("Skipping unavailable models: "
-                      + ", ".join(m.split("/")[-1] for m in dead))
+        results = probe_models(candidates, cfg)
+        alive = [m for m in candidates if results.get(m, (True, ""))[0]]
+
+        # "Skipping unavailable models" told the user nothing they could act on. Grouping
+        # by cause does: a daily quota needs credits or a wait, a down provider needs
+        # neither — it will come back on its own.
+        by_reason: dict[str, list[str]] = {}
+        for model in candidates:
+            ok, reason = results.get(model, (True, ""))
+            if not ok:
+                by_reason.setdefault(reason, []).append(model.split("/")[-1])
+        for reason, models in sorted(by_reason.items(), key=lambda kv: -len(kv[1])):
+            self._log(f"{len(models)} model(s) — {reason}: {', '.join(models)}")
+        if "daily free quota used up" in by_reason:
+            self._log("Daily free quota is an account limit, not a setting — it resets "
+                      "at 00:00 UTC, or add credits at openrouter.ai to lift it.")
         if not alive:
             self._log("No configured model answered — using the Settings model anyway.")
             return [cfg["ai_provider"]["model"]]
@@ -1193,7 +1214,7 @@ class App(tk.Tk):
 
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
-        self.settings_tab = SettingsTab(self.notebook)
+        self.settings_tab = SettingsTab(self.notebook, on_models_changed=self._refresh_model_lists)
         self.notebook.add(self.settings_tab, text="Settings")
         self._add_sheet_tab()
 
@@ -1406,6 +1427,11 @@ class App(tk.Tk):
                 return
             self.job_manager.stop_all()
         self.destroy()
+
+    def _refresh_model_lists(self):
+        """Settings fetched a new catalogue — every sheet tab offers it too."""
+        for tab in self.sheet_tabs:
+            tab._refresh_parallel_models()
 
     def _add_sheet_tab(self):
         if len(self.sheet_tabs) >= MAX_PARALLEL_JOBS:
