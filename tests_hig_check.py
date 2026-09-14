@@ -35,27 +35,63 @@ def menu_of(app):
     return app.nametowidget(app.cget("menu"))
 
 
+def real_entries(menu):
+    """Indices of entries that actually carry a label.
+
+    X11 menus start with a tearoff entry that macOS menus do not have, and asking a
+    tearoff for its -label raises TclError. Every walk of a menu has to skip those, or
+    the same test passes on a Mac and explodes on a Linux CI runner.
+    """
+    return [i for i in range(menu.index("end") + 1)
+            if menu.type(i) not in ("separator", "tearoff")]
+
+
+def labels(menu):
+    return [menu.entrycget(i, "label") for i in real_entries(menu)]
+
+
 def items(menu):
     """(label, accelerator, type) for each entry."""
-    out = []
-    for i in range(menu.index("end") + 1):
-        kind = menu.type(i)
-        if kind in ("separator", "tearoff"):
-            continue
-        out.append((menu.entrycget(i, "label"),
-                    menu.entrycget(i, "accelerator"), kind))
-    return out
+    return [(menu.entrycget(i, "label"),
+             menu.entrycget(i, "accelerator"),
+             menu.type(i)) for i in real_entries(menu)]
+
+
+def test_menu_walk_survives_x11_tearoffs():
+    """Guards the walker itself, since macOS never produces the entry that broke it.
+
+    X11 adds a tearoff as entry 0 of every menu; asking it for -label raises TclError,
+    which is how this suite passed on a Mac and failed on a Linux CI runner.
+    """
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        menu = tk.Menu(root, tearoff=1)
+        menu.add_command(label="Open", accelerator="Cmd+O")
+        menu.add_separator()
+        menu.add_command(label="Close", accelerator="Cmd+W")
+
+        kinds = [menu.type(i) for i in range(menu.index("end") + 1)]
+        assert "separator" in kinds, kinds
+        assert labels(menu) == ["Open", "Close"], labels(menu)
+        assert [text for text, _, _ in items(menu)] == ["Open", "Close"]
+        if "tearoff" in kinds:
+            print(f"menu walk skips the X11 tearoff and separator {kinds}: OK")
+        else:
+            print(f"menu walk skips separators {kinds} "
+                  f"(no tearoff on this platform): OK")
+    finally:
+        root.destroy()
 
 
 def test_menu_bar_present_and_standard():
     app = gui_app.App()
     app.update()
-    labels = [menu_of(app).entrycget(i, "label")
-              for i in range(menu_of(app).index("end") + 1)]
+    names = labels(menu_of(app))
 
     for required in ("File", "Edit", "View", "Window", "Help"):
-        assert required in labels, f"menu bar missing '{required}': {labels}"
-    print(f"menu bar present with standard menus {labels}: OK")
+        assert required in names, f"menu bar missing '{required}': {names}"
+    print(f"menu bar present with standard menus {names}: OK")
     app.destroy()
 
 
@@ -66,7 +102,7 @@ def test_every_menu_command_has_a_shortcut():
     mb = menu_of(app)
 
     missing = []
-    for i in range(mb.index("end") + 1):
+    for i in real_entries(mb):
         label = mb.entrycget(i, "label")
         if label in ("Window", "Help"):     # system-managed / informational
             continue
@@ -171,6 +207,7 @@ if __name__ == "__main__":
     gui_app.messagebox.askyesno = lambda *a, **k: True
 
     try:
+        test_menu_walk_survives_x11_tearoffs()
         test_menu_bar_present_and_standard()
         test_every_menu_command_has_a_shortcut()
         test_menu_items_reflect_state()
