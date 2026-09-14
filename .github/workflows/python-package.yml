@@ -1,5 +1,12 @@
-# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+# Lint, import-check and run the offline test suites on every push and PR.
+#
+# Two things differ from the stock Python template this replaces:
+#   * `pytest` collected nothing and exited 5 ("no tests ran"). The suites are
+#     deliberately standalone scripts named tests_*.py, which pytest does not collect;
+#     run_tests.py runs them the way TESTING.md says to.
+#   * Python 3.9 was in the matrix, but the code uses PEP 604 (`int | None`) in runtime
+#     annotations across a dozen modules, so 3.9 cannot even import it. README has said
+#     3.10+ throughout.
 
 name: Python package
 
@@ -11,30 +18,43 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
     - uses: actions/checkout@v4
+
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+        cache: pip
+
+    # Nine of the suites build real Tk widgets. Xvfb gives them a display; without it
+    # they fail with "no display name and no $DISPLAY environment variable".
+    - name: Install Xvfb and Tk
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb tk
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install flake8 pytest
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        python -m pip install flake8
+        pip install -r requirements.txt
+
+    - name: Check Tk is available
+      run: python -c "import tkinter; print('tkinter', tkinter.TkVersion)"
+
     - name: Lint with flake8
       run: |
-        # stop the build if there are Python syntax errors or undefined names
+        # Syntax errors and undefined names fail the build.
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    - name: Test with pytest
-      run: |
-        pytest
+        # Everything else is advisory.
+        flake8 . --count --exit-zero --max-complexity=12 --max-line-length=110 --statistics
+
+    - name: Run offline test suites
+      # No AI_API_KEY: every suite here replaces the transport, and the run must not
+      # depend on a secret or spend the account's daily request allowance.
+      run: xvfb-run -a python run_tests.py

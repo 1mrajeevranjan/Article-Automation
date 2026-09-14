@@ -32,6 +32,18 @@ duration, which model served it, word count, reference count, and the PDFs writt
 
 ## Offline suites (no network, no quota used)
 
+Run them all — this is what CI runs, and it exits non-zero if any suite fails:
+
+```bash
+python run_tests.py            # every offline suite
+python run_tests.py --list     # show what would run
+python run_tests.py -k parallel
+```
+
+On a headless Linux box the Tk suites need a display: `xvfb-run -a python run_tests.py`.
+
+Individually:
+
 ```bash
 .venv/bin/python tests_client_logic.py       # fallback chain, daily-cap blacklist, cancellation
 .venv/bin/python tests_manual_check.py       # excel round-trip, PDF render, full pipeline w/ fake client

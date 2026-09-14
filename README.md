@@ -271,6 +271,8 @@ main.py / gui_app.py
 pass/fail with a plain-English description of what it proved.
 
 ```bash
+.venv/bin/python run_tests.py                # all of them; exits non-zero on any failure
+
 .venv/bin/python tests_client_logic.py       # AI client: fallback, quota handling, cancellation
 .venv/bin/python tests_manual_check.py       # Excel round-trip, PDF render, fake-client pipeline
 .venv/bin/python tests_parallel_check.py     # concurrency safety: shared writes, request budget
