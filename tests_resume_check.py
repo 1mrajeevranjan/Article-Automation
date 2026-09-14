@@ -27,6 +27,9 @@ load_dotenv()
 import gui_app
 from excel_io import ExcelBatch
 
+import usage_tracker
+usage_tracker.use_isolated_state()   # never count test calls against the real daily allowance
+
 TMP = Path("/tmp/resume_check")
 
 

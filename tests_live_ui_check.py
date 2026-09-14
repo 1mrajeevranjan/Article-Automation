@@ -25,6 +25,9 @@ load_dotenv()
 import batch_runner
 import gui_app
 
+import usage_tracker
+usage_tracker.use_isolated_state()   # never count test calls against the real daily allowance
+
 TMP = Path("/tmp/live_ui_check")
 
 

@@ -15,6 +15,7 @@ import config_manager
 from ai_client import AIClient, AIClientError, probe_models
 import model_health as health
 from model_panel import ModelPanel
+from usage_tracker import TRACKER, affordability, requests_for_article
 from batch_runner import JobManager, MAX_PARALLEL_JOBS, partition_batches
 from excel_io import ExcelBatch, MissingColumnsError
 from orchestrator import run_article
@@ -407,6 +408,11 @@ class BatchTab(ttk.Frame):
         self.parallel_status = ttk.Label(action_row, text="Idle", foreground="gray")
         self.parallel_status.pack(side="left", padx=(14, 0))
 
+        # The daily free allowance is shared across every model and every batch. Showing
+        # it here is the difference between "the models are broken" and "today is spent".
+        self.quota_label = ttk.Label(left, text="", foreground="gray")
+        self.quota_label.pack(fill="x", pady=(6, 0))
+
         ttk.Separator(left, orient="horizontal").pack(fill="x", pady=12)
 
         # ---------------- per-batch runners: own play/stop toggle, progress ----------------
@@ -475,6 +481,7 @@ class BatchTab(ttk.Frame):
         ttk.Button(hint_row, text="Refresh Defaults", command=self._refresh_defaults).pack(side="right", padx=(0, 6))
 
         self._refresh_parallel_models()
+        self._refresh_quota_label()
 
     # ------------------------------------------------- parallel batches (this sheet)
 
@@ -525,6 +532,51 @@ class BatchTab(ttk.Frame):
         pool = list(pool or cfg.get("free_models") or [cfg["ai_provider"]["model"]])
         return {n: pool[i % len(pool)] for i, n in enumerate(batch_numbers)}
 
+    def _refresh_quota_label(self):
+        if not hasattr(self, "quota_label") or not self.quota_label.winfo_exists():
+            return
+        left = TRACKER.remaining()
+        colour = "#1a7f37" if left > 13 else ("#9a6700" if left else "#b3261e")
+        self.quota_label.config(text=TRACKER.summary(), foreground=colour)
+
+    def _confirm_affordable(self, batch_numbers: list[int]) -> bool:
+        """Check the day's allowance against the work before spending any of it.
+
+        Running 25 rows on 12 remaining requests does not fail at row 25; it fails at
+        row 2 and reads as "the models stopped responding", which is what kept being
+        reported. The arithmetic belongs in front of the user, not in the log afterwards.
+        """
+        rows = sum(len(self.batches[n - 1]) for n in batch_numbers
+                   if 1 <= n <= len(self.batches))
+        if not rows:
+            return True
+
+        sections = config_manager.load_config().get("defaults", {}).get("sections", 10)
+        needed, available, affordable = affordability(rows, sections, TRACKER)
+        self._refresh_quota_label()
+        # Only block on a limit the provider actually stated. Before the first 429 the
+        # 50 is an assumption about a free key; a paid key gets 1000 and must not be
+        # stopped on a guess.
+        if affordable >= rows or not TRACKER.limit_known():
+            return True
+
+        per = requests_for_article(sections)
+        detail = (f"{rows} article(s) need about {needed} provider requests "
+                  f"(~{per} each).\n"
+                  f"Today's free allowance has {available} left, which covers about "
+                  f"{affordable}.\n\n"
+                  f"{TRACKER.summary()}\n\n"
+                  f"The limit is per account and shared across every free model, so "
+                  f"switching model does not help. Adding 10 credits at openrouter.ai "
+                  f"raises it from 50/day to 1000/day.")
+        if affordable == 0:
+            messagebox.showerror("Out of free requests for today", detail)
+            self._log("Not started — " + TRACKER.summary())
+            return False
+        return messagebox.askyesno(
+            "Not enough free requests for the whole run",
+            detail + f"\n\nStart anyway and complete about {affordable}?")
+
     def _live_model_pool(self) -> list:
         """Models that answer right now, in configured preference order."""
         cfg = config_manager.load_config()
@@ -536,6 +588,7 @@ class BatchTab(ttk.Frame):
         results = probe_models(candidates, cfg, deep=True)
         alive = [m for m in candidates if results.get(m, (True, ""))[0]]
         self._refresh_model_dot()
+        self._refresh_quota_label()
 
         # "Skipping unavailable models" told the user nothing they could act on. Grouping
         # by cause does: a daily quota needs credits or a wait, a down provider needs
@@ -714,6 +767,9 @@ class BatchTab(ttk.Frame):
             )
             return
 
+        if not self._confirm_affordable(wanted):
+            return
+
         auto = self.parallel_model_var.get().strip() == AUTO_MODEL
         pool = None
         if auto:
@@ -785,6 +841,7 @@ class BatchTab(ttk.Frame):
         values[COL["status"]] = "Done" if done else status
         self.tree.item(iid, values=values)
         self.included[row_number] = not done
+        self._refresh_quota_label()
 
     def _refresh_progress_counts(self):
         """Recomputes the 'N done' figures shown in the dropdown and the inspect line."""

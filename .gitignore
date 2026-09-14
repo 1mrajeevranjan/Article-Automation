@@ -10,3 +10,4 @@ gui_launch.log
 build/
 dist/
 *.egg-info/
+.usage.json

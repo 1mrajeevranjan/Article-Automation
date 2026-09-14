@@ -12,6 +12,9 @@ os.environ.setdefault("AI_API_KEY", "test-key")
 
 import orchestrator
 
+import usage_tracker
+usage_tracker.use_isolated_state()   # never count test calls against the real daily allowance
+
 
 class SlowClient:
     """Stands in for a provider that takes 5s per call, honouring cancellation the way

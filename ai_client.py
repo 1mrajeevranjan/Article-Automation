@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from openai import OpenAI, APIError, APIStatusError, APITimeoutError
 
 import model_health as health
+from usage_tracker import TRACKER
 
 logger = logging.getLogger("ai_client")
 
@@ -46,8 +47,12 @@ _DAILY_CAP_MARKERS = ("free-models-per-day", "per-day", "daily limit")
 
 
 # A capability probe asks for this many words and demands at least this many back.
-_WRITE_PROBE_WORDS = 80
-_WRITE_PROBE_MINIMUM = 25
+_WRITE_PROBE_WORDS = 60
+_WRITE_PROBE_MINIMUM = 15
+# Generating prose is not a ping. Measured: north-mini-code 46s, dots-3-note 77s.
+_DEEP_PROBE_TIMEOUT = 75
+# Marker for the inner call: do the prose check, skip the ping stage.
+_DEEP_ONLY = "prose-only"
 
 
 def probe_models(models, config: dict, timeout: int = 20, deep: bool = False) -> dict:
@@ -68,52 +73,98 @@ def probe_models(models, config: dict, timeout: int = 20, deep: bool = False) ->
         return {m: (True, "") for m in models}
 
     url = provider["base_url"].rstrip("/") + "/chat/completions"
+    probe_timeout = _DEEP_PROBE_TIMEOUT if deep else timeout
+
+    # Two stages, because a prose probe costs ~100x a ping. Ping everything first, then
+    # only ask the survivors to write — typically 3-6 models rather than 19.
+    if deep is True:
+        shallow = probe_models(models, config, timeout=timeout, deep=False)
+        answering = [m for m in models if shallow[m][0]]
+        # Skip models whose writing ability was established recently — that answer does
+        # not change hour to hour, and re-deriving it costs a generation per model.
+        unproven = [m for m in answering if health.REGISTRY.needs_prose_check(m)]
+        written = (probe_models(unproven, config, timeout=timeout, deep=_DEEP_ONLY)
+                   if unproven else {})
+
+        results = {}
+        for model in models:
+            if model in written:
+                results[model] = written[model]
+            elif health.REGISTRY.known_non_writer(model):
+                results[model] = (False, health.REGISTRY.reason(model))
+            else:
+                results[model] = shallow[model]
+        return results
 
     def probe(model: str):
+        payload = {"model": model}
         if deep:
-            prompt = (f"Write exactly {_WRITE_PROBE_WORDS} words of continuous prose "
-                      f"explaining what a computer network is. Output only the prose.")
-            max_tokens = _WRITE_PROBE_WORDS * 3
+            # No max_tokens. Reasoning models spend their whole budget on hidden
+            # reasoning tokens before emitting a single word of content: capping this
+            # at 3x the word count returned empty content with finish_reason "length"
+            # and wrongly condemned seven working models as "cannot write prose".
+            # Measured: all seven write 800-1,600 words when the cap is removed.
+            payload["messages"] = [{"role": "user", "content": (
+                f"Write about {_WRITE_PROBE_WORDS} words of continuous prose explaining "
+                f"what a computer network is. Output only the prose.")}]
         else:
-            prompt, max_tokens = "ping", 1
-        body = json.dumps({
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens,
-        }).encode()
+            payload["messages"] = [{"role": "user", "content": "ping"}]
+            payload["max_tokens"] = 1
+        body = json.dumps(payload).encode()
+        TRACKER.record_request()
         request = urllib.request.Request(
             url, data=body,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                payload = json.load(response)
-            if payload.get("error"):
-                return model, (False, _classify_reason(None, str(payload["error"])))
-            if not payload.get("choices"):
+            with urllib.request.urlopen(request, timeout=probe_timeout) as response:
+                reply = json.load(response)
+            if reply.get("error"):
+                return model, (False, _classify_reason(None, str(reply["error"])))
+            if not reply.get("choices"):
                 return model, (False, "empty response")
             if deep:
-                text = (payload["choices"][0].get("message") or {}).get("content") or ""
+                choice = reply["choices"][0]
+                text = (choice.get("message") or {}).get("content") or ""
                 words = len(text.split())
                 if words < _WRITE_PROBE_MINIMUM:
+                    # Truncation is a budget artefact, not a verdict on the model —
+                    # only a model that chose to stop this short cannot write.
+                    if choice.get("finish_reason") == "length":
+                        return model, (False, "ran out of tokens before writing")
                     return model, (False, f"answers, but cannot write prose ({words} words)")
             return model, (True, "")
         except urllib.error.HTTPError as exc:
             detail = ""
             try:
-                detail = json.loads(exc.read()).get("error", {}).get("message", "")
+                error = json.loads(exc.read()).get("error", {})
+                detail = error.get("message", "")
+                TRACKER.record_limit_headers((error.get("metadata") or {}).get("headers"))
             except Exception:  # noqa: BLE001
                 pass
             return model, (False, _classify_reason(exc.code, detail))
         except Exception as exc:  # noqa: BLE001
-            return model, (False, type(exc).__name__)
+            # "TimeoutError" is a Python class name, not something a user can act on.
+            name = type(exc).__name__
+            if "Timeout" in name or "timed out" in str(exc).lower():
+                return model, (False, f"too slow to answer (over {probe_timeout}s)")
+            return model, (False, f"unreachable ({name})")
 
     results: dict = {}
     with ThreadPoolExecutor(max_workers=min(len(models), 10)) as pool:
         for model, outcome in pool.map(probe, models):
             results[model] = outcome
-            health.REGISTRY.observe_probe(model, outcome[0], outcome[1])
+            health.REGISTRY.observe_probe(model, outcome[0], outcome[1], prose=bool(deep))
     return results
+
+
+def _rate_limit_headers(detail: str) -> dict:
+    """Pull the provider's own limit/remaining/reset out of a 429 body."""
+    try:
+        payload = json.loads(detail) if detail.strip().startswith("{") else {}
+    except (ValueError, AttributeError):
+        return {}
+    return ((payload.get("error") or {}).get("metadata") or {}).get("headers") or {}
 
 
 def _classify_reason(status_code, detail: str) -> str:
@@ -353,6 +404,7 @@ class AIClient:
                 if self._request_semaphore is not None:
                     self._request_semaphore.acquire()
                 try:
+                    TRACKER.record_request()
                     response = self._client.chat.completions.create(
                         model=model,
                         temperature=temperature,
@@ -374,7 +426,9 @@ class AIClient:
                 if self._is_daily_cap(detail, status_code):
                     self._mark_exhausted(model)
                     health.REGISTRY.observe_failure(model, "daily free quota used up")
-                    raise AIClientError("per-day free quota reached") from exc
+                    TRACKER.record_limit_headers(_rate_limit_headers(detail))
+                    raise AIClientError(
+                        "per-day free quota reached — " + TRACKER.summary()) from exc
                 reason = _classify_reason(status_code, detail)
                 if status_code in (403, 404):
                     # Restricted or not offered: no retry will change either.

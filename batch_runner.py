@@ -25,6 +25,7 @@ from pathlib import Path
 from ai_client import AIClient, AIClientError, probe_models
 from excel_io import ExcelBatch
 from orchestrator import run_article
+from usage_tracker import TRACKER, affordability, requests_for_article
 
 logger = logging.getLogger("batch_runner")
 
@@ -187,10 +188,18 @@ class JobRunner(threading.Thread):
         provider = self.config["ai_provider"]
         chain = [self.job.model] + [m for m in (self.config.get("free_models") or [])
                                     if m != self.job.model]
+
+        # Probing is not free: every probe spends one of the account's 50 daily free
+        # requests, the same pool the articles draw on. Checking 19 models costs almost
+        # an entire article. Check only as many as a call may actually fall through to.
+        breadth = max(1, provider.get("max_models_per_call", 4))
+        chain = chain[:breadth]
+
         try:
             # deep=True: a 1-token ping cannot tell a writer from a classifier, and a
             # classifier in the pool produces 3-word "sections" that pass every HTTP
-            # check and ruin the article.
+            # check and ruin the article. Cached for PROSE_CHECK_TTL, so this is usually
+            # a ping, not a generation.
             results = probe_models(chain, self.config, deep=True)
         except Exception:  # noqa: BLE001 - a failed probe must not stop the run
             return
@@ -261,6 +270,23 @@ class JobRunner(threading.Thread):
             self.emit(("job_done", job.job_id))
             return
 
+        # Say up front what the day's remaining allowance can actually cover. Running 25
+        # rows against 12 remaining requests does not fail at row 25 — it fails at row 2
+        # and looks like the models are broken, which is what kept being reported.
+        needed, available, affordable = affordability(len(planned), job.sections, TRACKER)
+        if affordable < len(planned) and TRACKER.limit_known():
+            self._log(f"{len(planned)} row(s) need ~{needed} provider requests; "
+                      f"{available} left in today's free allowance "
+                      f"(~{requests_for_article(job.sections)} per article). "
+                      f"About {affordable} row(s) will finish before the quota runs out.")
+        if affordable == 0 and TRACKER.limit_known():
+            self._set_status(
+                "Failed",
+                f"out of free requests for today — {TRACKER.summary()}. "
+                f"Add credits at openrouter.ai for 1000/day, or wait for the reset.")
+            self.emit(("job_done", job.job_id))
+            return
+
         consecutive_failures = 0
         for batch_number, row in planned:
             if job.stop_event.is_set():
@@ -296,6 +322,7 @@ class JobRunner(threading.Thread):
                 if state.stage_timings:
                     self._log("    " + " · ".join(
                         f"{stage} {_mmss(seconds)}" for stage, seconds in state.stage_timings))
+                self._log(f"    {TRACKER.summary()}")
             else:
                 job.failed_rows += 1
                 consecutive_failures += 1

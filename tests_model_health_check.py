@@ -14,6 +14,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import usage_tracker
+usage_tracker.use_isolated_state()   # never count test calls against the real daily allowance
+
 import ai_client
 import model_health as health
 from ai_client import AIClient, AIClientError

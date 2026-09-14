@@ -13,6 +13,7 @@ from tkinter import ttk
 import config_manager
 import model_health as health
 from ai_client import probe_models
+from usage_tracker import TRACKER
 
 DOT = 11          # diameter of the status dot, px
 ROW_PAD = 6
@@ -52,6 +53,13 @@ class ModelPanel(tk.Toplevel):
                   font=("", 15, "bold")).pack(side="left")
         self.check_button = ttk.Button(header, text="Check now", command=self.refresh)
         self.check_button.pack(side="right")
+
+        # The daily allowance explains more failures than any per-model state does: it
+        # is shared across every free model, so 19 green models still means three
+        # articles a day on a free key.
+        self.quota = ttk.Label(container, text="", font=("", 12), wraplength=500,
+                               justify="left")
+        self.quota.pack(fill="x", pady=(6, 2))
 
         self.summary = ttk.Label(container, text="", foreground="gray", wraplength=500,
                                  justify="left")
@@ -104,6 +112,10 @@ class ModelPanel(tk.Toplevel):
         models = config_manager.load_config().get("free_models") or []
         rows = health.REGISTRY.snapshot(models)
 
+        left = TRACKER.remaining()
+        colour = health.GREEN if left > 13 else (health.YELLOW if left else health.RED)
+        self.quota.config(text=TRACKER.summary(), foreground=colour)
+
         counts = {state: 0 for state in (health.READY, health.LIMITED,
                                          health.BLOCKED, health.UNKNOWN)}
         for row in rows:
@@ -120,9 +132,9 @@ class ModelPanel(tk.Toplevel):
         if blocked:
             parts.append(f"{blocked} unavailable")
         note = " · ".join(parts)
-        if limited:
-            note += ("    Free-tier daily quotas reset at 00:00 UTC; adding credits at "
-                     "openrouter.ai lifts them.")
+        note += ("\nThe daily allowance is shared across every free model, so a green "
+                 "model still stops working once the account's requests are spent. "
+                 "Adding 10 credits at openrouter.ai raises 50/day to 1000/day.")
         self.summary.config(text=note)
 
     def _render_row(self, row: dict):

@@ -25,6 +25,9 @@ load_dotenv()
 import config_manager
 import gui_app
 
+import usage_tracker
+usage_tracker.use_isolated_state()   # never count test calls against the real daily allowance
+
 TMP = Path("/tmp/hig_check")
 
 

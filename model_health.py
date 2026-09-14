@@ -62,6 +62,10 @@ STRIKES_BEFORE_BENCH = 2
 BENCH_SECONDS = 900
 # A reply this far below the requested length means the model cannot do the job.
 MIN_LENGTH_RATIO = 0.35
+# How long a "can this model write?" answer stays good. Whether a model is a writer or
+# a classifier does not change hour to hour, and re-asking costs a full generation per
+# model — 179s across the catalogue, at every batch start, for an unchanging answer.
+PROSE_CHECK_TTL = 6 * 3600
 
 
 def state_for_reason(reason: str) -> str:
@@ -90,14 +94,26 @@ class ModelHealth:
             "latency": None,
             "can_write": None,     # None = untested, False = replies far too short
             "checked_at": 0.0,
+            "prose_checked_at": 0.0,
         })
 
-    def observe_probe(self, model: str, alive: bool, reason: str):
+    def observe_probe(self, model: str, alive: bool, reason: str, prose: bool = False):
         """Result of a health check. Never un-benches a model failing real calls."""
         with self._lock:
             record = self._record(model)
             record["checked_at"] = time.time()
             record["reason"] = reason
+            if prose:
+                record["prose_checked_at"] = time.time()
+                # Only an actual short answer proves a model cannot write. A timeout or
+                # a quota error during the prose stage says nothing about capability, so
+                # leave it untested rather than condemning it.
+                if alive:
+                    record["can_write"] = True
+                elif reason.startswith(_BLOCKED_PREFIXES):
+                    record["can_write"] = False
+                else:
+                    record["prose_checked_at"] = 0.0
             if alive:
                 if record["can_write"] is False:
                     record["state"] = BLOCKED
@@ -146,6 +162,19 @@ class ModelHealth:
                 reason=f"answers, but cannot write full sections ({words} words for {wanted})",
                 benched_until=time.time() + BENCH_SECONDS, checked_at=time.time(),
             )
+
+    def needs_prose_check(self, model: str) -> bool:
+        """True unless we recently established whether this model can write."""
+        with self._lock:
+            record = self._records.get(model)
+            if not record or record["can_write"] is None:
+                return True
+            return (time.time() - record["prose_checked_at"]) > PROSE_CHECK_TTL
+
+    def known_non_writer(self, model: str) -> bool:
+        with self._lock:
+            record = self._records.get(model)
+            return bool(record and record["can_write"] is False)
 
     def reset(self):
         """Forget everything. For tests, and for a user asking to re-check from scratch."""

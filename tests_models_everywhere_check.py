@@ -22,6 +22,9 @@ from pypdf import PdfReader
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import usage_tracker
+usage_tracker.use_isolated_state()   # never count test calls against the real daily allowance
+
 import config_manager
 import ai_client
 import gui_app

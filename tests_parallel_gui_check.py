@@ -27,6 +27,9 @@ import batch_runner
 import gui_app
 from batch_runner import MAX_PARALLEL_JOBS
 
+import usage_tracker
+usage_tracker.use_isolated_state()   # never count test calls against the real daily allowance
+
 TMP = Path("/tmp/parallel_gui_check")
 
 

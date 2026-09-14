@@ -26,6 +26,9 @@ os.environ.setdefault("AI_API_KEY", "test-key")
 import batch_runner
 from batch_runner import JobManager, MAX_PARALLEL_JOBS, WorkbookRegistry, partition_batches
 
+import usage_tracker
+usage_tracker.use_isolated_state()   # never count test calls against the real daily allowance
+
 TMP = Path("/tmp/parallel_check")
 
 CONFIG = {

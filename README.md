@@ -12,7 +12,7 @@ Excel file row by row so any run can be stopped and resumed exactly where it lef
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
-![Tests](https://img.shields.io/badge/tests-14%20suites-brightgreen)
+![Tests](https://img.shields.io/badge/tests-15%20suites-brightgreen)
 
 ## Features
 
@@ -152,6 +152,39 @@ to `free_models`, and pushes it into every open sheet tab, so the same complete 
 selectable everywhere. Which of them will actually write an article is a separate
 question — see below.
 
+## The daily request allowance (read this first)
+
+Most reports of "the models stopped responding" are this, and no code change fixes it.
+OpenRouter's free tier allows a fixed number of requests **per day, across every free
+model combined** — the numbers come straight off a 429:
+
+```
+X-RateLimit-Limit: 50
+X-RateLimit-Remaining: 0
+limit_source: openrouter_free_tier_daily
+"Add 10 credits to unlock 1000 free model requests per day"
+```
+
+One article costs roughly one request per section plus six (outline, intro/conclusion,
+editor, abstract, references, one correction pass). So:
+
+| Key | Requests/day | 10-section articles/day |
+|---|---|---|
+| Free, no credits | 50 | **~3** |
+| 10+ credits added | 1000 | ~71 |
+
+A 25-row batch needs ~350 requests. On a free key it does not fail at row 25 — it fails
+at row 2, and looks exactly like the models breaking. Because the limit is per *account*
+and shared across every model, having 19 models in the pool does not help at all: they
+all draw on the same 50.
+
+The app therefore counts every request it makes (health probes included), persists the
+count across launches, corrects it from the provider's own headers whenever a 429
+arrives, and shows the remainder beside the Run button and in the Models window. Before
+a run it checks whether the day's remainder can cover the work and refuses, with the
+arithmetic, rather than burning what is left. That check only blocks once the provider
+has actually stated a limit — a paid key is never stopped on a guess.
+
 ## Model reliability
 
 Free-tier models fail constantly, and the app's job is to make that cheap rather than to
@@ -173,11 +206,16 @@ is not resilience; it is a self-inflicted stall.
 model sits out for 15 minutes instead of being retried on every call. HTTP 403/404 skip
 the second chance — no retry changes a restriction.
 
-**Health checks ask for prose, not a ping.** A 1-token ping cannot tell a writer from a
-classifier: `nvidia/nemotron-3.5-content-safety` passes the ping and then answers a
-1,000-word section request with three words. That is worse than a clean failure, because
-the article proceeds with unusable text and the editor's correction loop chases it. The
-deep probe asks for real prose and marks anything that cannot produce it red.
+**Health checks ask for prose, not a ping — carefully.** A 1-token ping cannot tell a
+writer from a classifier: `nvidia/nemotron-3.5-content-safety` passes the ping and then
+answers a 1,000-word section request with three words. The prose probe catches that, but
+it must not cap `max_tokens`: reasoning models spend their whole budget on hidden
+reasoning before emitting a word, so a cap returns empty content with
+`finish_reason: "length"` and wrongly condemns them. Seven working models were marked
+"cannot write prose" that way. Truncation is now read as a budget artefact, not a
+verdict; probes run in two stages (cheap ping for all, prose only for the survivors) and
+the prose answer is cached for six hours, because probing is not free — it spends the
+same daily allowance the articles need.
 
 ### Reading the traffic light
 
@@ -229,7 +267,7 @@ main.py / gui_app.py
 
 ## Testing
 
-14 test suites, no test framework dependency — each is a standalone script printing
+15 test suites, no test framework dependency — each is a standalone script printing
 pass/fail with a plain-English description of what it proved.
 
 ```bash
@@ -242,6 +280,7 @@ pass/fail with a plain-English description of what it proved.
 .venv/bin/python tests_models_everywhere_check.py  # model catalogue reaches every tab, timing log, PDF has no disclaimer
 .venv/bin/python tests_sheet_rules_check.py  # column mapping, year cutoff, author byline
 .venv/bin/python tests_model_health_check.py # fail-fast bounds, circuit breaker, traffic-light states
+.venv/bin/python tests_quota_check.py        # daily allowance accounting, pre-flight refusal, probe cost
 # ...and 5 more — see TESTING.md
 ```
 

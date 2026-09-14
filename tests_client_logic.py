@@ -13,6 +13,9 @@ import ai_client
 import model_health
 from ai_client import AIClient, AIClientError, CancelledError
 
+import usage_tracker
+usage_tracker.use_isolated_state()   # never count test calls against the real daily allowance
+
 
 BASE_CONFIG = {
     "ai_provider": {

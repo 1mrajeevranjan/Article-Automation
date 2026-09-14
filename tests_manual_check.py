@@ -11,6 +11,9 @@ from excel_io import ExcelBatch
 from state import ArticleState
 from pdf_renderer import render_pdf
 
+import usage_tracker
+usage_tracker.use_isolated_state()   # never count test calls against the real daily allowance
+
 
 class FakeClient:
     def chat_completion(self, system_prompt, user_prompt, model=None, temperature=None,
